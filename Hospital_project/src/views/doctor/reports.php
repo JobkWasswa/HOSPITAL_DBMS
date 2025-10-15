@@ -48,7 +48,6 @@ include '../layouts/header.php';
     </div>
 </div>
 
-<!-- Report Filters -->
 <div class="card mb-4">
     <div class="card-body">
         <form method="GET" class="row g-3">
@@ -71,12 +70,12 @@ include '../layouts/header.php';
             <div class="col-md-3">
                 <label for="start_date" class="form-label">Start Date</label>
                 <input type="date" class="form-control" id="start_date" name="start_date" 
-                       value="<?php echo $result['startDate']; ?>">
+                        value="<?php echo $result['startDate']; ?>">
             </div>
             <div class="col-md-3">
                 <label for="end_date" class="form-label">End Date</label>
                 <input type="date" class="form-control" id="end_date" name="end_date" 
-                       value="<?php echo $result['endDate']; ?>">
+                        value="<?php echo $result['endDate']; ?>">
             </div>
             <div class="col-md-3">
                 <label class="form-label">&nbsp;</label>
@@ -91,7 +90,6 @@ include '../layouts/header.php';
 </div>
 
 <?php if ($reportType === 'overview'): ?>
-    <!-- Overview Report -->
     <div class="row mb-4">
         <div class="col-md-3">
             <div class="card border-left-primary shadow h-100 py-2">
@@ -175,7 +173,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($reportType === 'patients'): ?>
-    <!-- Patient Statistics Report -->
     <div class="card">
         <div class="card-header">
             <h5 class="card-title mb-0">Patient Statistics</h5>
@@ -198,7 +195,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($reportType === 'appointments'): ?>
-    <!-- Appointment Report -->
     <div class="card">
         <div class="card-header">
             <h5 class="card-title mb-0">Appointment Report</h5>
@@ -222,7 +218,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($reportType === 'admissions'): ?>
-    <!-- Admission Report -->
     <div class="card">
         <div class="card-header">
             <h5 class="card-title mb-0">Admission Report</h5>
@@ -244,7 +239,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($reportType === 'financial'): ?>
-    <!-- Financial Report -->
     <div class="card">
         <div class="card-header">
             <h5 class="card-title mb-0">Financial Report</h5>
@@ -260,11 +254,11 @@ include '../layouts/header.php';
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($result['data'] as $item): ?>
+                        <?php foreach (($result['data'] ?? []) as $item): ?>
                             <tr>
-                                <td><?php echo htmlspecialchars($item['source']); ?></td>
-                                <td><?php echo $item['count']; ?></td>
-                                <td>$<?php echo number_format($item['total_amount'], 2); ?></td>
+                                <td><?php echo htmlspecialchars($item['source'] ?? ''); ?></td>
+                                <td><?php echo (int)($item['count'] ?? 0); ?></td>
+                                <td>$<?php echo number_format($item['total_amount'] ?? 0, 2); ?></td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -274,7 +268,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($reportType === 'doctors'): ?>
-    <!-- Doctor Performance Report -->
     <div class="card">
         <div class="card-header">
             <h5 class="card-title mb-0">Doctor Performance Report</h5>
@@ -293,13 +286,13 @@ include '../layouts/header.php';
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($result['data'] as $doctor): ?>
+                        <?php foreach (($result['data'] ?? []) as $doctor): ?>
                             <tr>
-                                <td><?php echo htmlspecialchars($doctor['doctor_name']); ?></td>
-                                <td><?php echo htmlspecialchars($doctor['specialization']); ?></td>
-                                <td><?php echo $doctor['total_appointments']; ?></td>
-                                <td><?php echo $doctor['total_treatments']; ?></td>
-                                <td><?php echo $doctor['unique_patients']; ?></td>
+                                <td><?php echo htmlspecialchars($doctor['doctor_name'] ?? ''); ?></td>
+                                <td><?php echo htmlspecialchars($doctor['specialization'] ?? ''); ?></td>
+                                <td><?php echo (int)($doctor['total_appointments'] ?? 0); ?></td>
+                                <td><?php echo (int)($doctor['total_treatments'] ?? 0); ?></td>
+                                <td><?php echo (int)($doctor['unique_patients'] ?? 0); ?></td>
                                 <td>$<?php echo number_format(($doctor['appointment_revenue'] ?? 0) + ($doctor['treatment_revenue'] ?? 0), 2); ?></td>
                             </tr>
                         <?php endforeach; ?>
@@ -310,7 +303,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($reportType === 'departments'): ?>
-    <!-- Department Report -->
     <div class="card">
         <div class="card-header">
             <h5 class="card-title mb-0">Department Report</h5>
@@ -344,7 +336,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($reportType === 'rooms'): ?>
-    <!-- Room Utilization Report -->
     <div class="card">
         <div class="card-header">
             <h5 class="card-title mb-0">Room Utilization Report</h5>
@@ -363,21 +354,27 @@ include '../layouts/header.php';
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($result['data'] as $room): ?>
+                        <?php foreach (($result['data'] ?? []) as $room): ?>
                             <tr>
-                                <td><?php echo htmlspecialchars($room['room_type']); ?></td>
-                                <td><?php echo $room['total_beds']; ?></td>
-                                <td><?php echo $room['occupied_beds']; ?></td>
-                                <td><?php echo $room['available_beds']; ?></td>
+                                <td><?php echo htmlspecialchars($room['room_type'] ?? ''); ?></td>
+                                
+                                <td><?php echo (int)($room['total_beds'] ?? 0); ?></td>
+                                
+                                <td><?php echo (int)($room['occupied_beds'] ?? 0); ?></td>
+                                
+                                <td><?php echo (int)($room['available_beds'] ?? 0); ?></td>
+                                
                                 <td>
+                                    <?php $utilization = number_format((float)($room['utilization_percentage'] ?? 0), 2); ?>
                                     <div class="progress" style="height: 20px;">
                                         <div class="progress-bar" role="progressbar" 
-                                             style="width: <?php echo $room['utilization_percentage']; ?>%">
-                                            <?php echo $room['utilization_percentage']; ?>%
+                                             style="width: <?php echo $utilization; ?>%">
+                                            <?php echo $utilization; ?>%
                                         </div>
                                     </div>
                                 </td>
-                                <td>$<?php echo number_format($room['daily_cost'], 2); ?></td>
+                                
+                                <td>$<?php echo number_format($room['daily_cost'] ?? 0, 2); ?></td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -387,7 +384,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($reportType === 'inventory'): ?>
-    <!-- Medicine Inventory Report -->
     <div class="card">
         <div class="card-header">
             <h5 class="card-title mb-0">Medicine Inventory Report</h5>
@@ -406,16 +402,16 @@ include '../layouts/header.php';
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($result['data'] as $medicine): ?>
+                        <?php foreach (($result['data'] ?? []) as $medicine): ?>
                             <tr>
-                                <td><?php echo htmlspecialchars($medicine['name']); ?></td>
-                                <td><?php echo htmlspecialchars($medicine['dosage']); ?></td>
-                                <td><?php echo $medicine['stock_quantity']; ?></td>
-                                <td>$<?php echo number_format($medicine['medicine_price'], 2); ?></td>
-                                <td>$<?php echo number_format($medicine['total_value'], 2); ?></td>
+                                <td><?php echo htmlspecialchars($medicine['name'] ?? ''); ?></td>
+                                <td><?php echo htmlspecialchars($medicine['dosage'] ?? ''); ?></td>
+                                <td><?php echo (int)($medicine['stock_quantity'] ?? 0); ?></td>
+                                <td>$<?php echo number_format($medicine['medicine_price'] ?? 0, 2); ?></td>
+                                <td>$<?php echo number_format($medicine['total_value'] ?? 0, 2); ?></td>
                                 <td>
                                     <?php
-                                    $statusClass = match($medicine['stock_status']) {
+                                    $statusClass = match($medicine['stock_status'] ?? 'Unknown') {
                                         'Critical' => 'bg-danger',
                                         'Low' => 'bg-warning',
                                         'Adequate' => 'bg-success',
@@ -423,7 +419,7 @@ include '../layouts/header.php';
                                     };
                                     ?>
                                     <span class="badge <?php echo $statusClass; ?>">
-                                        <?php echo $medicine['stock_status']; ?>
+                                        <?php echo htmlspecialchars($medicine['stock_status'] ?? 'N/A'); ?>
                                     </span>
                                 </td>
                             </tr>
@@ -435,7 +431,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($reportType === 'demographics'): ?>
-    <!-- Patient Demographics Report -->
     <div class="card">
         <div class="card-header">
             <h5 class="card-title mb-0">Patient Demographics</h5>
@@ -453,11 +448,11 @@ include '../layouts/header.php';
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php foreach ($result['data'] as $demo): ?>
+                                <?php foreach (($result['data'] ?? []) as $demo): ?>
                                     <tr>
-                                        <td><?php echo htmlspecialchars($demo['gender']); ?></td>
-                                        <td><?php echo $demo['count']; ?></td>
-                                        <td><?php echo $demo['percentage']; ?>%</td>
+                                        <td><?php echo htmlspecialchars($demo['gender'] ?? 'N/A'); ?></td>
+                                        <td><?php echo (int)($demo['count'] ?? 0); ?></td>
+                                        <td><?php echo number_format($demo['percentage'] ?? 0, 2); ?>%</td>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -472,7 +467,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($reportType === 'trends'): ?>
-    <!-- Monthly Trends Report -->
     <div class="card">
         <div class="card-header">
             <h5 class="card-title mb-0">Monthly Trends</h5>
@@ -488,11 +482,11 @@ include '../layouts/header.php';
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($result['data'] as $trend): ?>
+                        <?php foreach (($result['data'] ?? []) as $trend): ?>
                             <tr>
-                                <td><?php echo htmlspecialchars($trend['month_name']); ?></td>
-                                <td><?php echo $trend['appointments']; ?></td>
-                                <td>$<?php echo number_format($trend['revenue'], 2); ?></td>
+                                <td><?php echo htmlspecialchars($trend['month_name'] ?? 'N/A'); ?></td>
+                                <td><?php echo (int)($trend['appointments'] ?? 0); ?></td>
+                                <td>$<?php echo number_format($trend['revenue'] ?? 0, 2); ?></td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>

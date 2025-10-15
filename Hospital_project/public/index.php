@@ -23,7 +23,7 @@ if ($auth->isLoggedIn()) {
     exit();
 }
 
-// If not logged in, redirect to login page
-header("Location: " . APP_URL . "/public/login.php");
+// If not logged in, redirect to landing page
+header("Location: " . APP_URL . "/public/landing.php");
 exit();
 ?>
