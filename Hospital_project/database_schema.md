@@ -10,7 +10,7 @@ This document outlines the complete database schema for the Hospital Management 
 | Field Name | Data Type | Key | Description |
 |------------|-----------|-----|-------------|
 | history_id | INT | PK | Primary key for medical history records |
-| condition | VARCHAR(45) | | Medical condition or diagnosis |
+| medical_condition | VARCHAR(45) | | Medical condition or diagnosis |
 | diagnosis_date | DATETIME | | Date when condition was diagnosed |
 | notes | VARCHAR(100) | | Additional notes about the condition |
 

@@ -12,7 +12,7 @@ if (session_status() == PHP_SESSION_NONE) {
 // Application settings
 define('APP_NAME', 'Hospital Management System');
 define('APP_VERSION', '1.0.0');
-define('APP_URL', 'http://localhost/HOSPITAL_DBMSHospital_project');
+define('APP_URL', 'http://localhost/HOSPITAL_DBMS/Hospital_project');
 
 // Security settings
 define('SESSION_TIMEOUT', 3600); // 1 hour
