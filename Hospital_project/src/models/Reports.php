@@ -23,6 +23,7 @@ class Reports {
                     COUNT(*) as total_patients,
                     SUM(CASE WHEN gender = 'Male' THEN 1 ELSE 0 END) as male_patients,
                     SUM(CASE WHEN gender = 'Female' THEN 1 ELSE 0 END) as female_patients,
+                    SUM(CASE WHEN gender = 'Other' THEN 1 ELSE 0 END) as other_patients,
                     SUM(CASE WHEN DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) as new_patients_30_days
                 FROM patient
             ");
@@ -40,9 +41,11 @@ class Reports {
             $sql = "
                 SELECT 
                     COUNT(*) as total_appointments,
-                    SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) as completed,
-                    SUM(CASE WHEN status = 'Pending' THEN 1 ELSE 0 END) as pending,
-                    SUM(consultation_fee) as expected_revenue
+                    SUM(CASE WHEN appointment_status = 'Scheduled' THEN 1 ELSE 0 END) as scheduled,
+                    SUM(CASE WHEN appointment_status = 'Completed' THEN 1 ELSE 0 END) as completed,
+                    SUM(CASE WHEN appointment_status = 'Cancelled' THEN 1 ELSE 0 END) as cancelled,
+                    SUM(CASE WHEN appointment_status = 'No show' THEN 1 ELSE 0 END) as no_show,
+                    SUM(consultation_fee) as total_revenue
                 FROM appointment
                 WHERE DATE(appointment_date) BETWEEN ? AND ?
             ";
@@ -61,9 +64,9 @@ class Reports {
             $sql = "
                 SELECT 
                     COUNT(*) as total_admissions,
-                    SUM(CASE WHEN status = 'Current' THEN 1 ELSE 0 END) as current_admissions,
-                    SUM(CASE WHEN status = 'Discharged' THEN 1 ELSE 0 END) as discharged_admissions,
-                    SUM(total_cost) as total_billings
+                    SUM(CASE WHEN discharge_date IS NULL THEN 1 ELSE 0 END) as current_admissions,
+                    SUM(CASE WHEN discharge_date IS NOT NULL THEN 1 ELSE 0 END) as discharged,
+                    ROUND(AVG(DATEDIFF(COALESCE(discharge_date, CURDATE()), admission_date) + 1), 1) as avg_length_of_stay
                 FROM admission
                 WHERE DATE(admission_date) BETWEEN ? AND ?
             ";
@@ -82,7 +85,8 @@ class Reports {
             $stmt = $this->pdo->prepare("
                 SELECT 
                     SUM(CASE WHEN payment_status = 'Paid' THEN 1 ELSE 0 END) as paid,
-                    SUM(CASE WHEN payment_status = 'Pending' THEN 1 ELSE 0 END) as pending
+                    SUM(CASE WHEN payment_status = 'Pending' THEN 1 ELSE 0 END) as pending,
+                    SUM(CASE WHEN payment_status = 'Declined' THEN 1 ELSE 0 END) as declined
                 FROM payment
             ");
             $stmt->execute();
@@ -98,7 +102,7 @@ class Reports {
         try {
             $stmt = $this->pdo->prepare("
                 SELECT 
-                    COALESCE(SUM(amount), 0) as today_revenue
+                    COALESCE(SUM(total_amount), 0) as today_revenue
                 FROM payment
                 WHERE DATE(payment_date) = CURDATE()
             ");
@@ -137,9 +141,9 @@ class Reports {
                 SELECT 
                     a.appointment_id,
                     a.appointment_date,
-                    p.name as patient_n,
-                    d.name as doctor_n,
-                    a.status,
+                    p.name as patient_name,
+                    d.name as doctor_name,
+                    a.appointment_status,
                     a.consultation_fee
                 FROM appointment a
                 JOIN patient p ON a.patient_id = p.patient_id
@@ -163,10 +167,9 @@ class Reports {
                 SELECT 
                     adm.admission_id,
                     adm.admission_date,
-                    p.name as patient_n
+                    p.name as patient_name,
                     r.room_type,
-                    adm.status,
-                    
+                    adm.discharge_date
                 FROM admission adm
                 JOIN patient p ON adm.patient_id = p.patient_id
                 JOIN room r ON adm.room_id = r.room_id
@@ -187,11 +190,10 @@ class Reports {
         try {
             $sql = "
                 SELECT 
-                    pay.payment_id,
+                    pay.bill_id,
                     pay.payment_date,
-                    p.first_name as patient_fn,
-                    p.last_name as patient_ln,
-                    pay.amount,
+                    p.name as patient_name,
+                    pay.total_amount,
                     pay.payment_method,
                     pay.payment_status
                 FROM payment pay
@@ -214,16 +216,17 @@ class Reports {
             $sql = "
                 SELECT 
                     d.doctor_id,
-                    d.first_name,
-                    d.last_name,
-                    d.specialty,
+                    d.name as doctor_name,
+                    d.specialization,
                     COUNT(a.appointment_id) as total_appointments,
-                    SUM(CASE WHEN a.status = 'Completed' THEN 1 ELSE 0 END) as completed_appointments,
-                    COALESCE(SUM(a.consultation_fee), 0) as total_revenue
+                    COALESCE(SUM(a.consultation_fee), 0) as appointment_revenue,
+                    COUNT(t.treatment_id) as total_treatments,
+                    COALESCE(SUM(t.treatment_fee), 0) as treatment_revenue,
+                    (COUNT(DISTINCT a.patient_id) + COUNT(DISTINCT t.patient_id)) as unique_patients
                 FROM doctor d
-                LEFT JOIN appointment a ON d.doctor_id = a.doctor_id
-                WHERE (a.appointment_id IS NULL) OR (DATE(a.appointment_date) BETWEEN ? AND ?)
-                GROUP BY d.doctor_id, d.first_name, d.last_name, d.specialty
+                LEFT JOIN appointment a ON d.doctor_id = a.doctor_id AND DATE(a.appointment_date) BETWEEN ? AND ?
+                LEFT JOIN treatment t ON d.doctor_id = t.doctor_id AND DATE(t.treatment_date) BETWEEN ? AND ?
+                GROUP BY d.doctor_id, d.name, d.specialization
                 ORDER BY total_appointments DESC
             ";
             
@@ -232,7 +235,7 @@ class Reports {
             $endDate = $endDate ?: date('Y-m-d');
 
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([$startDate, $endDate]);
+            $stmt->execute([$startDate, $endDate, $startDate, $endDate]);
             return $stmt->fetchAll(PDO::FETCH_ASSOC);
         } catch (PDOException $e) {
             error_log("Reports getDoctorPerformance error: " . $e->getMessage());
@@ -248,10 +251,12 @@ class Reports {
                     d.name as department_name,
                     d.location,
                     COUNT(DISTINCT doc.doctor_id) as total_doctors,
-                    COUNT(DISTINCT s.staff_id) as total_staff
+                    COUNT(DISTINCT s.staff_id) as total_staff,
+                    COUNT(a.appointment_id) as total_appointments
                 FROM department d
                 LEFT JOIN doctor doc ON d.department_id = doc.department_id
                 LEFT JOIN staff s ON d.department_id = s.department_id
+                LEFT JOIN appointment a ON doc.doctor_id = a.doctor_id
                 GROUP BY d.department_id, d.name, d.location
                 ORDER BY total_doctors DESC
             ");
@@ -274,6 +279,7 @@ class Reports {
                     r.daily_cost,
                     COUNT(b.bed_id) as total_beds,
                     SUM(CASE WHEN b.bed_status = 'Occupied' THEN 1 ELSE 0 END) as occupied_beds,
+                    (COUNT(b.bed_id) - SUM(CASE WHEN b.bed_status = 'Occupied' THEN 1 ELSE 0 END)) as available_beds,
                     ROUND((SUM(CASE WHEN b.bed_status = 'Occupied' THEN 1 ELSE 0 END) / COUNT(b.bed_id)) * 100, 2) as utilization_percentage
                 FROM room r
                 LEFT JOIN bed b ON r.room_id = b.room_id
@@ -317,18 +323,15 @@ class Reports {
     /** Get patient demographics report (age/gender breakdown) */
     public function getPatientDemographics() {
         try {
-            $stmt = $this->pdo->prepare("
-                SELECT 
-                    gender,
-                    SUM(CASE WHEN TIMESTAMPDIFF(YEAR, DOB, CURDATE()) < 18 THEN 1 ELSE 0 END) as age_0_17,
-                    SUM(CASE WHEN TIMESTAMPDIFF(YEAR, DOB, CURDATE()) BETWEEN 18 AND 45 THEN 1 ELSE 0 END) as age_18_45,
-                    SUM(CASE WHEN TIMESTAMPDIFF(YEAR, DOB, CURDATE()) > 45 THEN 1 ELSE 0 END) as age_45_plus,
-                    COUNT(*) as total_count
-                FROM patient
-                GROUP BY gender
-            ");
+            $total = (int)$this->pdo->query("SELECT COUNT(*) AS c FROM patient")->fetch(PDO::FETCH_ASSOC)['c'];
+            if ($total === 0) { return []; }
+            $stmt = $this->pdo->prepare("SELECT gender, COUNT(*) AS count FROM patient GROUP BY gender");
             $stmt->execute();
-            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($rows as &$r) {
+                $r['percentage'] = round(($r['count'] / $total) * 100, 2);
+            }
+            return $rows;
         } catch (PDOException $e) {
             error_log("Reports getPatientDemographics error: " . $e->getMessage());
             return [];
@@ -344,13 +347,13 @@ class Reports {
             
             $sql = "
                 SELECT 
-                    DATE_FORMAT(appointment_date, '%Y-%m') as period,
+                    DATE_FORMAT(appointment_date, '%b %Y') as month_name,
                     COUNT(*) as appointments,
                     COALESCE(SUM(consultation_fee), 0) as revenue
                 FROM appointment
                 WHERE DATE(appointment_date) BETWEEN ? AND ?
-                GROUP BY period
-                ORDER BY period
+                GROUP BY month_name
+                ORDER BY STR_TO_DATE(CONCAT('01 ', month_name), '%d %b %Y')
             ";
             $params = [$startDate, $endDate];
             
@@ -359,6 +362,50 @@ class Reports {
             return $stmt->fetchAll(PDO::FETCH_ASSOC);
         } catch (PDOException $e) {
             error_log("Reports getMonthlyTrends error: " . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Get revenue aggregated by source for accountant chart
+     */
+    public function getRevenueBySource($startDate, $endDate) {
+        try {
+            $results = [];
+
+            // Appointments revenue
+            $stmt = $this->pdo->prepare("SELECT COALESCE(SUM(consultation_fee), 0) as total_amount, COUNT(*) as cnt FROM appointment WHERE DATE(appointment_date) BETWEEN ? AND ?");
+            $stmt->execute([$startDate, $endDate]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $results[] = [ 'source' => 'Appointments', 'total_amount' => (float)($row['total_amount'] ?? 0), 'count' => (int)($row['cnt'] ?? 0) ];
+
+            // Lab tests revenue
+            $stmt = $this->pdo->prepare("SELECT COALESCE(SUM(test_cost), 0) as total_amount, COUNT(*) as cnt FROM lab_test WHERE DATE(test_date) BETWEEN ? AND ?");
+            $stmt->execute([$startDate, $endDate]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $results[] = [ 'source' => 'Lab Tests', 'total_amount' => (float)($row['total_amount'] ?? 0), 'count' => (int)($row['cnt'] ?? 0) ];
+
+            // Treatments revenue
+            $stmt = $this->pdo->prepare("SELECT COALESCE(SUM(treatment_fee), 0) as total_amount, COUNT(*) as cnt FROM treatment WHERE DATE(treatment_date) BETWEEN ? AND ?");
+            $stmt->execute([$startDate, $endDate]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $results[] = [ 'source' => 'Treatments', 'total_amount' => (float)($row['total_amount'] ?? 0), 'count' => (int)($row['cnt'] ?? 0) ];
+
+            // Prescriptions revenue (quantity * medicine_price)
+            $stmt = $this->pdo->prepare("SELECT COALESCE(SUM(pr.quantity * m.medicine_price), 0) as total_amount, COUNT(*) as cnt FROM prescription pr JOIN medicine m ON pr.medicine_id = m.medicine_id JOIN treatment t ON pr.treatment_id = t.treatment_id WHERE DATE(t.treatment_date) BETWEEN ? AND ?");
+            $stmt->execute([$startDate, $endDate]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $results[] = [ 'source' => 'Prescriptions', 'total_amount' => (float)($row['total_amount'] ?? 0), 'count' => (int)($row['cnt'] ?? 0) ];
+
+            // Admissions revenue (days * room.daily_cost)
+            $stmt = $this->pdo->prepare("SELECT COALESCE(SUM( (DATEDIFF(COALESCE(discharge_date, CURDATE()), admission_date) + 1) * r.daily_cost ), 0) as total_amount, COUNT(*) as cnt FROM admission a JOIN room r ON a.room_id = r.room_id WHERE DATE(a.admission_date) BETWEEN ? AND ?");
+            $stmt->execute([$startDate, $endDate]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $results[] = [ 'source' => 'Admissions', 'total_amount' => (float)($row['total_amount'] ?? 0), 'count' => (int)($row['cnt'] ?? 0) ];
+
+            return $results;
+        } catch (PDOException $e) {
+            error_log('Reports getRevenueBySource error: ' . $e->getMessage());
             return [];
         }
     }

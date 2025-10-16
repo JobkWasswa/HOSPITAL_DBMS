@@ -48,8 +48,8 @@ class ReportsController {
                 $data = $this->reportsModel->getAdmissionsList($startDate, $endDate);
                 break;
             case 'financial':
-                // Detailed list of payments/transactions
-                $data = $this->reportsModel->getPaymentsList($startDate, $endDate);
+                // Accountant chart expects aggregated revenue by source
+                $data = $this->reportsModel->getRevenueBySource($startDate, $endDate);
                 break;
             case 'doctors':
                 // Doctor performance/list
@@ -83,8 +83,10 @@ class ReportsController {
                     'patients' => $this->reportsModel->getPatientStatistics(),
                     'appointments' => $this->reportsModel->getAppointmentStatistics($startDate, $endDate),
                     'admissions' => $this->reportsModel->getAdmissionStatistics($startDate, $endDate),
-                    'payments' => $this->reportsModel->getPaymentStatusBreakdown(),
-                    'today_revenue' => $this->reportsModel->getTodayRevenue(),
+                    'financial' => [
+                        'payment_stats' => $this->reportsModel->getPaymentStatusBreakdown(),
+                        'total_revenue' => $this->reportsModel->getTodayRevenue()
+                    ],
                 ];
                 $reportType = 'overview';
                 break;
