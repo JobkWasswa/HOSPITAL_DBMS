@@ -65,6 +65,7 @@ include '../layouts/header.php';
                     <option value="inventory" <?php echo $reportType === 'inventory' ? 'selected' : ''; ?>>Medicine Inventory</option>
                     <option value="demographics" <?php echo $reportType === 'demographics' ? 'selected' : ''; ?>>Patient Demographics</option>
                     <option value="trends" <?php echo $reportType === 'trends' ? 'selected' : ''; ?>>Monthly Trends</option>
+                    <option value="charts_doctor" <?php echo $reportType === 'charts_doctor' ? 'selected' : ''; ?>>Charts (Line/Pie/Bar)</option>
                 </select>
             </div>
             <div class="col-md-3">
@@ -494,6 +495,113 @@ include '../layouts/header.php';
             </div>
         </div>
     </div>
+
+<?php elseif ($reportType === 'charts_doctor'): ?>
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">Appointments per Day</h5>
+        </div>
+        <div class="card-body">
+            <canvas id="appointmentsPerDayChart" height="90"></canvas>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Appointment Status Distribution</h5>
+                </div>
+                <div class="card-body">
+                    <canvas id="appointmentStatusPie" height="180"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Top Medicines by Quantity</h5>
+                </div>
+                <div class="card-body">
+                    <canvas id="topMedicinesBar" height="180"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script>
+    (function() {
+        // Prepare datasets from PHP
+        const perDay = <?php echo json_encode($result['data']['appointments_per_day'] ?? []); ?>;
+        const perDayLabels = perDay.map(r => r.day);
+        const perDayCounts = perDay.map(r => Number(r.count));
+
+        const statusShare = <?php echo json_encode($result['data']['appointment_status_share'] ?? []); ?>;
+        const statusLabels = statusShare.map(r => r.status);
+        const statusCounts = statusShare.map(r => Number(r.count));
+
+        const topMeds = <?php echo json_encode($result['data']['top_medicines'] ?? []); ?>;
+        const medLabels = topMeds.map(r => r.medicine_name);
+        const medCounts = topMeds.map(r => Number(r.total_quantity));
+
+        // Line: Appointments per Day
+        const ctxLine = document.getElementById('appointmentsPerDayChart');
+        new Chart(ctxLine, {
+            type: 'line',
+            data: {
+                labels: perDayLabels,
+                datasets: [{
+                    label: 'Appointments',
+                    data: perDayCounts,
+                    borderColor: '#4e73df',
+                    backgroundColor: 'rgba(78,115,223,0.15)',
+                    tension: 0.3,
+                    fill: true,
+                    pointRadius: 2
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+
+        // Pie: Appointment Status Distribution
+        const ctxPie = document.getElementById('appointmentStatusPie');
+        new Chart(ctxPie, {
+            type: 'pie',
+            data: {
+                labels: statusLabels,
+                datasets: [{
+                    data: statusCounts,
+                    backgroundColor: ['#1cc88a', '#4e73df', '#e74a3b', '#f6c23e'],
+                    borderWidth: 1
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+
+        // Bar: Top Medicines by Quantity
+        const ctxBar = document.getElementById('topMedicinesBar');
+        new Chart(ctxBar, {
+            type: 'bar',
+            data: {
+                labels: medLabels,
+                datasets: [{
+                    label: 'Quantity',
+                    data: medCounts,
+                    backgroundColor: '#36b9cc',
+                    borderColor: '#36b9cc',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+    })();
+    </script>
+
 <?php endif; ?>
 
 <style>

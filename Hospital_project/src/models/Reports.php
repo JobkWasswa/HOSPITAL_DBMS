@@ -118,6 +118,55 @@ class Reports {
     // 2. DETAILED LIST / TABLE METHODS
     // =================================================================
 
+    /**
+     * Appointments per day within date range
+     */
+    public function getAppointmentsPerDay($startDate, $endDate) {
+        try {
+            $stmt = $this->pdo->prepare("\n                SELECT DATE(appointment_date) AS day, COUNT(*) AS count\n                FROM appointment\n                WHERE DATE(appointment_date) BETWEEN ? AND ?\n                GROUP BY DATE(appointment_date)\n                ORDER BY DATE(appointment_date)\n            ");
+            $stmt->execute([$startDate, $endDate]);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            error_log('Reports getAppointmentsPerDay error: ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Appointment status distribution within date range
+     */
+    public function getAppointmentStatusShare($startDate, $endDate) {
+        try {
+            $stmt = $this->pdo->prepare("\n                SELECT appointment_status AS status, COUNT(*) AS count\n                FROM appointment\n                WHERE DATE(appointment_date) BETWEEN ? AND ?\n                GROUP BY appointment_status\n            ");
+            $stmt->execute([$startDate, $endDate]);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            error_log('Reports getAppointmentStatusShare error: ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Top medicines by quantity (optionally filtered by treatment date range)
+     */
+    public function getTopMedicinesByQuantity($limit = 10, $startDate = null, $endDate = null) {
+        try {
+            $params = [];
+            $where = '';
+            if ($startDate && $endDate) {
+                $where = 'WHERE DATE(t.treatment_date) BETWEEN ? AND ?';
+                $params = [$startDate, $endDate];
+            }
+            $sql = "\n                SELECT m.name AS medicine_name, SUM(p.quantity) AS total_quantity\n                FROM prescription p\n                JOIN medicine m ON p.medicine_id = m.medicine_id\n                JOIN treatment t ON p.treatment_id = t.treatment_id\n                $where\n                GROUP BY m.medicine_id, m.name\n                ORDER BY total_quantity DESC\n                LIMIT " . intval($limit) . "\n            ";
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            error_log('Reports getTopMedicinesByQuantity error: ' . $e->getMessage());
+            return [];
+        }
+    }
+
     /** Get list of all patients */
     public function getPatientsList() {
         try {

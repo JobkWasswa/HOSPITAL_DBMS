@@ -76,6 +76,15 @@ class ReportsController {
                 $data = $this->reportsModel->getMonthlyTrends($startDate, $endDate);
                 break;
 
+            case 'charts_doctor':
+                // Compose datasets needed for doctor charts
+                $data = [
+                    'appointments_per_day' => $this->reportsModel->getAppointmentsPerDay($startDate, $endDate),
+                    'appointment_status_share' => $this->reportsModel->getAppointmentStatusShare($startDate, $endDate),
+                    'top_medicines' => $this->reportsModel->getTopMedicinesByQuantity(10, $startDate, $endDate)
+                ];
+                break;
+
             case 'overview':
             default:
                 // Default is the overview, which pulls summary stats
