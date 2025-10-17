@@ -131,11 +131,7 @@ include '../layouts/header.php';
                             <i class="fas fa-credit-card"></i> Payments
                         </a>
                     </li>
-                    <li class="nav-item">
-                        <a class="nav-link <?php echo $reportType === 'lab_tests' ? 'active' : ''; ?>" href="reports.php?type=lab_tests">
-                            <i class="fas fa-flask"></i> Lab Tests
-                        </a>
-                    </li>
+                    
                 </ul>
             </div>
         </div>
