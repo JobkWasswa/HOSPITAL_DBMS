@@ -55,9 +55,6 @@ include '../layouts/header.php';
                 <label for="report" class="form-label">Report Type</label>
                 <select class="form-select" id="report" name="report" onchange="this.form.submit()">
                     <option value="overview" <?php echo $reportType === 'overview' ? 'selected' : ''; ?>>Overview</option>
-                    <option value="patients" <?php echo $reportType === 'patients' ? 'selected' : ''; ?>>Patient Statistics</option>
-                    <option value="appointments" <?php echo $reportType === 'appointments' ? 'selected' : ''; ?>>Appointment Report</option>
-                    <option value="admissions" <?php echo $reportType === 'admissions' ? 'selected' : ''; ?>>Admission Report</option>
                     <option value="financial" <?php echo $reportType === 'financial' ? 'selected' : ''; ?>>Financial Report</option>
                     <option value="doctors" <?php echo $reportType === 'doctors' ? 'selected' : ''; ?>>Doctor Performance</option>
                     <option value="departments" <?php echo $reportType === 'departments' ? 'selected' : ''; ?>>Department Report</option>
