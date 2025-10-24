@@ -131,11 +131,7 @@ include '../layouts/header.php';
                             <i class="fas fa-credit-card"></i> Payments
                         </a>
                     </li>
-                    <li class="nav-item">
-                        <a class="nav-link <?php echo $reportType === 'lab_tests' ? 'active' : ''; ?>" href="reports.php?type=lab_tests">
-                            <i class="fas fa-flask"></i> Lab Tests
-                        </a>
-                    </li>
+                    
                 </ul>
             </div>
         </div>
@@ -409,7 +405,6 @@ include '../layouts/header.php';
                                     <th>Gender</th>
                                     <th>Age</th>
                                     <th>Phone</th>
-                                    <th>Registration Date</th>
                                 </tr>
                             <?php elseif ($reportType === 'appointments'): ?>
                                 <tr>
@@ -435,8 +430,8 @@ include '../layouts/header.php';
                                     <th>Patient</th>
                                     <th>Test Type</th>
                                     <th>Results</th>
-                                    <th>Date</th>
                                     <th>Cost</th>
+                                    <th>Date</th>
                                 </tr>
                             <?php endif; ?>
                         </thead>
@@ -449,7 +444,6 @@ include '../layouts/header.php';
                                         <td><?php echo htmlspecialchars($item['gender'] ?? 'N/A'); ?></td>
                                         <td><?php echo isset($item['DOB']) ? date_diff(date_create($item['DOB']), date_create('today'))->y . ' years' : 'N/A'; ?></td>
                                         <td><?php echo htmlspecialchars($item['phone'] ?? 'N/A'); ?></td>
-                                        <td><?php echo isset($item['created_at']) ? date('M j, Y', strtotime($item['created_at'])) : 'N/A'; ?></td>
                                     <?php elseif ($reportType === 'appointments'): ?>
                                         <td><span class="badge bg-info"><?php echo $item['appointment_id'] ?? 'N/A'; ?></span></td>
                                         <td><?php echo htmlspecialchars($item['patient_name'] ?? 'N/A'); ?></td>
@@ -473,8 +467,9 @@ include '../layouts/header.php';
                                         <td><?php echo htmlspecialchars($item['patient_name'] ?? 'N/A'); ?></td>
                                         <td><?php echo htmlspecialchars($item['test_type'] ?? 'N/A'); ?></td>
                                         <td><?php echo isset($item['results']) ? htmlspecialchars(substr($item['results'], 0, 20)) . (strlen($item['results']) > 20 ? '...' : '') : 'N/A'; ?></td>
-                                        <td><?php echo isset($item['test_date']) ? date('M j, Y', strtotime($item['test_date'])) : 'N/A'; ?></td>
                                         <td>$<?php echo number_format($item['test_cost'] ?? 0, 2); ?></td>
+                                        <td><?php echo isset($item['test_date']) ? date('M j, Y', strtotime($item['test_date'])) : 'N/A'; ?></td>
+
                                     <?php endif; ?>
                                 </tr>
                             <?php endforeach; ?>
