@@ -1,0 +1,150 @@
+\documentclass{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{longtable}
+\usepackage{titlesec}
+\titleformat{\section}{\large\bfseries}{}{0em}{}
+
+\begin{document}
+
+\title{Medical System Data Dictionary}
+\author{ATUGONZA}
+\date{}
+\maketitle
+
+\newcommand{\tableheader}{
+\hline
+\textbf{Field Name} & \textbf{Data Type} & \textbf{Key} \\
+\hline
+}
+
+% 1. patient
+\section*{1. patient}
+\begin{longtable}{|p{4cm}|p{6cm}|p{3cm}|}
+\tableheader
+patient\_id & INT & PK \\
+name & VARCHAR(30) &  \\
+DOB & DATE &  \\
+gender & ENUM("Male", "Female", "Other") &  \\
+address & VARCHAR(45) &  \\
+phone & VARCHAR(15) &  \\
+\hline
+\end{longtable}
+
+% 2. users
+\section*{2. users}
+\begin{longtable}{|p{4cm}|p{6cm}|p{3cm}|}
+\tableheader
+user\_id & INT & PK \\
+username & VARCHAR(20) &  \\
+password\_hash & VARCHAR(225) &  \\
+role & ENUM("doctor","nurse","receptionist","accountant") &  \\
+shift & ENUM("Morning","Evening","Night") &  \\
+phone & VARCHAR(20) &  \\
+specialization & VARCHAR(30) &  \\
+is\_active & TINYINT &  \\
+created\_at & TIMESTAMP &  \\
+department\_id & INT & FK \\
+\hline
+\end{longtable}
+
+% 3. department
+\section*{3. department}
+\begin{longtable}{|p{4cm}|p{6cm}|p{3cm}|}
+\tableheader
+department\_id & INT & PK \\
+name & VARCHAR(45) &  \\
+location & VARCHAR(45) &  \\
+\hline
+\end{longtable}
+
+% 4. room
+\section*{4. room}
+\begin{longtable}{|p{4cm}|p{6cm}|p{3cm}|}
+\tableheader
+room\_id & INT & PK \\
+room\_type & ENUM("General","Private","ICU","Emergency") &  \\
+room\_status & ENUM("Available","Occupied","Maintenance") &  \\
+daily\_cost & DECIMAL &  \\
+bed\_stock & INT &  \\
+\hline
+\end{longtable}
+
+% 5. admission
+\section*{5. admission}
+\begin{longtable}{|p{4cm}|p{6cm}|p{3cm}|}
+\tableheader
+admission\_id & INT & PK \\
+admission\_date & DATETIME &  \\
+discharge\_date & DATETIME &  \\
+patient\_id & INT & FK \\
+room\_id & INT & FK \\
+\hline
+\end{longtable}
+
+% 6. lab_test
+\section*{6. lab\_test}
+\begin{longtable}{|p{4cm}|p{6cm}|p{3cm}|}
+\tableheader
+test\_id & INT & PK \\
+test\_type & VARCHAR(45) &  \\
+results & VARCHAR(20) &  \\
+test\_date & DATETIME &  \\
+test\_cost & DECIMAL &  \\
+patient\_id & INT & FK \\
+\hline
+\end{longtable}
+
+% 7. payment
+\section*{7. payment}
+\begin{longtable}{|p{4cm}|p{6cm}|p{3cm}|}
+\tableheader
+bill\_id & INT & PK \\
+total\_amount & DECIMAL &  \\
+payment\_method & ENUM("Cash", "Card", "Insurance") &  \\
+payment\_status & ENUM("Pending","Paid","Declined") &  \\
+payment\_date & DATETIME &  \\
+patient\_id & INT & FK \\
+\hline
+\end{longtable}
+
+% 8. medicine
+\section*{8. medicine}
+\begin{longtable}{|p{4cm}|p{6cm}|p{3cm}|}
+\tableheader
+medicine\_id & INT & PK \\
+name & VARCHAR(20) &  \\
+dosage & VARCHAR(10) &  \\
+stock\_quantity & INT &  \\
+medicine\_price & DECIMAL &  \\
+\hline
+\end{longtable}
+
+
+% 9. treatment
+\section*{9. treatment}
+\begin{longtable}{|p{4cm}|p{6cm}|p{3cm}|}
+\tableheader
+treatment\_id & INT & PK \\
+notes & VARCHAR(45) &  \\
+treatment\_date & DATETIME &  \\
+treatment\_fee & DECIMAL &  \\
+patient\_id & INT & FK \\
+user\_id & INT & FK \\
+medicine\_id & INT & FK \\
+\hline
+\end{longtable}
+
+% 10. appointment
+\section*{10. appointment}
+\begin{longtable}{|p{4cm}|p{6cm}|p{3cm}|}
+\tableheader
+appointment\_id & INT & PK \\
+appointment\_date & DATETIME &  \\
+consultation\_fee & DECIMAL &  \\
+appointment\_status & ENUM("Scheduled","Completed","Cancelled", "No show") &  \\
+patient\_id & INT & FK \\
+user\_id & INT & FK \\
+\hline
+\end{longtable}
+
+\end{document}
