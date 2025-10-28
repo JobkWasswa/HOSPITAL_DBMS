@@ -2,6 +2,8 @@
 /**
  * Doctor Dashboard
  * Hospital Management System
+ * * FIX: Replaced incorrect 'doctor_id' references with 'user_id' 
+ * and fixed the data access keys in the HTML view.
  */
 
 require_once '../../../config/config.php';
@@ -13,7 +15,9 @@ $auth = new Auth($pdo);
 // Require doctor role
 $auth->requireRole(ROLE_DOCTOR);
 
+// Current user data from the 'users' table
 $currentUser = $auth->getCurrentUser();
+$currentUserId = $currentUser['user_id'] ?? 0;
 
 // Get dashboard statistics
 try {
@@ -21,45 +25,47 @@ try {
     $stmt = $pdo->prepare("
         SELECT COUNT(*) as count 
         FROM appointment 
-        WHERE doctor_id = (SELECT doctor_id FROM users WHERE user_id = ?) 
+        WHERE user_id = ?  /* FIX: Changed doctor_id subquery to direct user_id filter */
         AND DATE(appointment_date) = CURDATE()
     ");
-    $stmt->execute([$currentUser['user_id']]);
+    $stmt->execute([$currentUserId]);
     $todayAppointments = $stmt->fetch()['count'];
 
     // Total patients treated
     $stmt = $pdo->prepare("
         SELECT COUNT(DISTINCT patient_id) as count 
         FROM treatment 
-        WHERE doctor_id = (SELECT doctor_id FROM users WHERE user_id = ?)
+        WHERE user_id = ?  /* FIX: Changed doctor_id subquery to direct user_id filter */
     ");
-    $stmt->execute([$currentUser['user_id']]);
+    $stmt->execute([$currentUserId]);
     $totalPatients = $stmt->fetch()['count'];
 
     // Pending lab results
+    // FIX: The treatment table uses user_id, not doctor_id
     $stmt = $pdo->prepare("
         SELECT COUNT(*) as count 
         FROM lab_test 
         WHERE patient_id IN (
             SELECT DISTINCT patient_id 
             FROM treatment 
-            WHERE doctor_id = (SELECT doctor_id FROM users WHERE user_id = ?)
+            WHERE user_id = ? /* FIX: Changed doctor_id subquery to direct user_id filter */
         ) 
         AND results IS NULL
     ");
-    $stmt->execute([$currentUser['user_id']]);
+    $stmt->execute([$currentUserId]);
     $pendingLabResults = $stmt->fetch()['count'];
 
     // Recent treatments
+    // FIX: The treatment table uses user_id, not doctor_id
     $stmt = $pdo->prepare("
         SELECT t.*, p.name as patient_name 
         FROM treatment t
         JOIN patient p ON t.patient_id = p.patient_id
-        WHERE t.doctor_id = (SELECT doctor_id FROM users WHERE user_id = ?)
+        WHERE t.user_id = ? /* FIX: Changed doctor_id subquery to direct user_id filter */
         ORDER BY t.treatment_date DESC
         LIMIT 5
     ");
-    $stmt->execute([$currentUser['user_id']]);
+    $stmt->execute([$currentUserId]);
     $recentTreatments = $stmt->fetchAll();
 
 } catch (PDOException $e) {
@@ -88,19 +94,17 @@ include '../layouts/header.php';
     </div>
 </div>
 
-<!-- Welcome Message -->
 <div class="alert alert-info" role="alert">
     <h4 class="alert-heading">
         <i class="fas fa-user-md"></i>
-        Welcome, Dr. <?php echo htmlspecialchars($currentUser['doctor_name']); ?>!
+        Welcome, Dr. <?php echo htmlspecialchars($currentUser['name'] ?? 'Doctor'); ?>! 
     </h4>
     <p class="mb-0">
-        Specialization: <?php echo htmlspecialchars($currentUser['specialization']); ?> | 
-        Last login: <?php echo date('M j, Y H:i', $_SESSION['login_time']); ?>
+        Specialization: <?php echo htmlspecialchars($currentUser['specialization'] ?? 'N/A'); ?> | 
+        Last login: <?php echo date('M j, Y H:i', $_SESSION['login_time'] ?? time()); ?>
     </p>
 </div>
 
-<!-- Statistics Cards -->
 <div class="row mb-4">
     <div class="col-xl-3 col-md-6 mb-4">
         <div class="card border-left-primary shadow h-100 py-2">
@@ -183,7 +187,6 @@ include '../layouts/header.php';
     </div>
 </div>
 
-<!-- Quick Actions -->
 <div class="row mb-4">
     <div class="col-12">
         <div class="card">
@@ -224,7 +227,6 @@ include '../layouts/header.php';
     </div>
 </div>
 
-<!-- Recent Treatments -->
 <div class="row">
     <div class="col-12">
         <div class="card">
@@ -293,6 +295,7 @@ include '../layouts/header.php';
 </div>
 
 <style>
+/* ... (CSS Styles remain the same) ... */
 .border-left-primary {
     border-left: 0.25rem solid #4e73df !important;
 }

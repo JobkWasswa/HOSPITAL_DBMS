@@ -2,6 +2,9 @@
 /**
  * Admission Model
  * Hospital Management System
+ * * FIXES: 
+ * 1. Corrected the logic in delete() to properly check room occupancy after deletion.
+ * 2. Ensured all CRUD and helper methods (getAll, getById, create, discharge, delete, etc.) are present and use JOINs for patient and room details.
  */
 
 class Admission {
@@ -11,20 +14,59 @@ class Admission {
         $this->pdo = $pdo;
     }
     
+    // -----------------------------------------------------------------
+    // HELPER METHODS FOR ROOM/PATIENT STATUS CHECKING
+    // -----------------------------------------------------------------
+
     /**
-     * Get all admissions with search and pagination
+     * Checks if a patient currently has an active admission.
+     */
+    public function isActiveAdmission($patientId): bool {
+        $stmt = $this->pdo->prepare("SELECT admission_id FROM admission WHERE patient_id = ? AND discharge_date IS NULL");
+        $stmt->execute([$patientId]);
+        return (bool) $stmt->fetch();
+    }
+
+    /**
+     * Gets the current occupancy and bed stock of a room.
+     */
+    public function getRoomOccupancy($roomId): ?array {
+        $stmt = $this->pdo->prepare("
+            SELECT 
+                r.room_id, 
+                r.bed_stock,
+                COUNT(a.admission_id) AS occupied_slots
+            FROM 
+                room r
+            LEFT JOIN 
+                admission a ON r.room_id = a.room_id AND a.discharge_date IS NULL
+            WHERE
+                r.room_id = ?
+            GROUP BY
+                r.room_id, r.bed_stock
+        ");
+        $stmt->execute([$roomId]);
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+    
+    // -----------------------------------------------------------------
+    // READ OPERATIONS
+    // -----------------------------------------------------------------
+    
+    /**
+     * Get all admissions with search and pagination (with joins)
      */
     public function getAll($search = '', $status = '', $limit = 20, $offset = 0) {
         try {
             $sql = "
                 SELECT a.*, p.name as patient_name, p.phone as patient_phone,
-                       r.room_type, r.daily_cost, b.bed_no, b.bed_type
+                        r.room_type, r.daily_cost
                 FROM admission a
                 JOIN patient p ON a.patient_id = p.patient_id
                 LEFT JOIN room r ON a.room_id = r.room_id
-                LEFT JOIN bed b ON a.bed_id = b.bed_id
                 WHERE 1=1
             ";
+            
             $params = [];
             
             if (!empty($search)) {
@@ -44,7 +86,7 @@ class Admission {
             
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute($params);
-            return $stmt->fetchAll();
+            return $stmt->fetchAll(PDO::FETCH_ASSOC); // Ensure FETCH_ASSOC for consistency
         } catch (PDOException $e) {
             error_log("Admission getAll error: " . $e->getMessage());
             return [];
@@ -86,74 +128,63 @@ class Admission {
     }
     
     /**
-     * Get admission by ID
+     * Get admission by ID (with joins)
      */
     public function getById($id) {
         try {
             $stmt = $this->pdo->prepare("
                 SELECT a.*, p.name as patient_name, p.phone as patient_phone, p.DOB, p.gender,
-                       r.room_type, r.daily_cost, b.bed_no, b.bed_type
+                        r.room_type, r.daily_cost, r.room_number
                 FROM admission a
                 JOIN patient p ON a.patient_id = p.patient_id
                 LEFT JOIN room r ON a.room_id = r.room_id
-                LEFT JOIN bed b ON a.bed_id = b.bed_id
                 WHERE a.admission_id = ?
             ");
+            
             $stmt->execute([$id]);
-            return $stmt->fetch();
+            return $stmt->fetch(PDO::FETCH_ASSOC); // Ensure FETCH_ASSOC for consistency
         } catch (PDOException $e) {
             error_log("Admission getById error: " . $e->getMessage());
             return null;
         }
     }
     
+    // -----------------------------------------------------------------
+    // WRITE OPERATIONS (FIXED FOR STOCK AWARENESS)
+    // -----------------------------------------------------------------
+    
     /**
      * Create new admission
+     * FIX: Checks if room is full after insertion and updates room_status to 'Occupied' only then.
      */
     public function create($data) {
         try {
             $this->pdo->beginTransaction();
             
-            // Auto-assign an available bed within the selected room if not provided
-            if (empty($data['bed_id']) && !empty($data['room_id'])) {
-                $stmt = $this->pdo->prepare("
-                    SELECT b.bed_id
-                    FROM bed b
-                    WHERE b.room_id = ? AND b.bed_status = 'Available'
-                    ORDER BY b.bed_id
-                    LIMIT 1
-                    FOR UPDATE
-                ");
-                $stmt->execute([$data['room_id']]);
-                $autoBedId = $stmt->fetchColumn();
-                if ($autoBedId) {
-                    $data['bed_id'] = (int)$autoBedId;
-                }
-            }
+            $roomId = $data['room_id'];
 
-            // Insert admission
+            // 1. Insert admission
             $stmt = $this->pdo->prepare("
-                INSERT INTO admission (admission_date, patient_id, room_id, bed_id) 
+                INSERT INTO admission (admission_date, patient_id, room_id, condition_on_admission) 
                 VALUES (?, ?, ?, ?)
             ");
+            // Assuming 'condition_on_admission' is a field you might want to include from the controller data
             $stmt->execute([
                 $data['admission_date'],
                 $data['patient_id'],
-                $data['room_id'],
-                $data['bed_id']
+                $roomId,
+                $data['condition_on_admission'] ?? null 
             ]);
             
             $admissionId = $this->pdo->lastInsertId();
             
-            // Update bed status to occupied
-            if ($data['bed_id']) {
-                $stmt = $this->pdo->prepare("
-                    UPDATE bed SET bed_status = 'Occupied' WHERE bed_id = ?
-                ");
-                $stmt->execute([$data['bed_id']]);
-                // Optionally mark room as occupied
+            // 2. Check room occupancy AFTER the new admission is inserted
+            $roomData = $this->getRoomOccupancy($roomId);
+            
+            // 3. Update room status if it is now FULLY occupied
+            if ($roomData && (int)$roomData['occupied_slots'] >= (int)$roomData['bed_stock']) {
                 $stmt = $this->pdo->prepare("UPDATE room SET room_status = 'Occupied' WHERE room_id = ?");
-                $stmt->execute([$data['room_id']]);
+                $stmt->execute([$roomId]);
             }
             
             $this->pdo->commit();
@@ -169,17 +200,20 @@ class Admission {
      * Update admission
      */
     public function update($id, $data) {
+        // NOTE: A proper update should also handle room changes and update room statuses
+        // For simplicity here, we only update admission details. Room status update logic
+        // for changing rooms is complex and usually done in the Controller.
         try {
             $stmt = $this->pdo->prepare("
                 UPDATE admission 
-                SET admission_date = ?, patient_id = ?, room_id = ?, bed_id = ?
+                SET admission_date = ?, patient_id = ?, room_id = ?, condition_on_admission = ?
                 WHERE admission_id = ?
             ");
             return $stmt->execute([
                 $data['admission_date'],
                 $data['patient_id'],
                 $data['room_id'],
-                $data['bed_id'],
+                $data['condition_on_admission'] ?? null,
                 $id
             ]);
         } catch (PDOException $e) {
@@ -190,18 +224,20 @@ class Admission {
     
     /**
      * Discharge patient
+     * FIX: Checks room occupancy *after* discharge and sets room_status to 'Available' only when empty.
      */
     public function discharge($id, $dischargeDate = null) {
         try {
             $this->pdo->beginTransaction();
             
-            // Get admission details
             $admission = $this->getById($id);
-            if (!$admission) {
-                throw new Exception("Admission not found");
+            if (!$admission || $admission['discharge_date'] !== null) {
+                throw new Exception("Active admission not found or already discharged.");
             }
             
-            // Update admission with discharge date
+            $roomId = $admission['room_id'];
+            
+            // 1. Update admission with discharge date
             $stmt = $this->pdo->prepare("
                 UPDATE admission 
                 SET discharge_date = ?
@@ -209,12 +245,16 @@ class Admission {
             ");
             $stmt->execute([$dischargeDate ?: date('Y-m-d H:i:s'), $id]);
             
-            // Update bed status to available
-            if ($admission['bed_id']) {
+            // 2. Check room occupancy *after* discharge (the admission is now marked discharged)
+            // The getRoomOccupancy query only counts non-discharged patients, so this check is now correct.
+            $roomData = $this->getRoomOccupancy($roomId);
+            
+            // 3. Update room status to 'Available' if occupancy is now 0
+            if ($roomData && (int)$roomData['occupied_slots'] === 0) {
                 $stmt = $this->pdo->prepare("
-                    UPDATE bed SET bed_status = 'Available' WHERE bed_id = ?
+                    UPDATE room SET room_status = 'Available' WHERE room_id = ?
                 ");
-                $stmt->execute([$admission['bed_id']]);
+                $stmt->execute([$roomId]);
             }
             
             $this->pdo->commit();
@@ -228,28 +268,35 @@ class Admission {
     
     /**
      * Delete admission
+     * **FIXED:** Performs the deletion first, then checks the *new* occupancy to correctly update the room status.
      */
     public function delete($id) {
         try {
             $this->pdo->beginTransaction();
             
-            // Get admission details
             $admission = $this->getById($id);
             if (!$admission) {
                 throw new Exception("Admission not found");
             }
+
+            $roomId = $admission['room_id'];
             
-            // Update bed status to available if bed was assigned
-            if ($admission['bed_id']) {
-                $stmt = $this->pdo->prepare("
-                    UPDATE bed SET bed_status = 'Available' WHERE bed_id = ?
-                ");
-                $stmt->execute([$admission['bed_id']]);
-            }
-            
-            // Delete admission
+            // 1. Delete admission
             $stmt = $this->pdo->prepare("DELETE FROM admission WHERE admission_id = ?");
             $stmt->execute([$id]);
+            
+            // 2. Check room occupancy *after* deletion (only if it was an active admission)
+            if ($admission['discharge_date'] === null) {
+                $roomData = $this->getRoomOccupancy($roomId);
+                
+                // 3. Update room status to 'Available' if occupancy is now 0
+                // We check against bed_stock=0 just in case of data integrity issues, 
+                // but the primary check is occupied_slots === 0
+                if ($roomData && (int)$roomData['occupied_slots'] === 0 && (int)$roomData['bed_stock'] > 0) {
+                    $stmt = $this->pdo->prepare("UPDATE room SET room_status = 'Available' WHERE room_id = ?");
+                    $stmt->execute([$roomId]);
+                }
+            }
             
             $this->pdo->commit();
             return true;
@@ -260,45 +307,9 @@ class Admission {
         }
     }
     
-    /**
-     * Get available beds
-     */
-    public function getAvailableBeds() {
-        try {
-            $stmt = $this->pdo->prepare("
-                SELECT b.*, r.room_type, r.daily_cost
-                FROM bed b
-                JOIN room r ON b.room_id = r.room_id
-                WHERE b.bed_status = 'Available'
-                ORDER BY r.room_type, b.bed_no
-            ");
-            $stmt->execute();
-            return $stmt->fetchAll();
-        } catch (PDOException $e) {
-            error_log("Admission getAvailableBeds error: " . $e->getMessage());
-            return [];
-        }
-    }
-
-    /**
-     * Get available beds by room
-     */
-    public function getAvailableBedsByRoom($roomId) {
-        try {
-            $stmt = $this->pdo->prepare("
-                SELECT b.bed_id, b.bed_no, b.bed_type, r.room_type, r.daily_cost
-                FROM bed b
-                JOIN room r ON b.room_id = r.room_id
-                WHERE b.bed_status = 'Available' AND b.room_id = ?
-                ORDER BY b.bed_no
-            ");
-            $stmt->execute([$roomId]);
-            return $stmt->fetchAll();
-        } catch (PDOException $e) {
-            error_log("Admission getAvailableBedsByRoom error: " . $e->getMessage());
-            return [];
-        }
-    }
+    // -----------------------------------------------------------------
+    // UTILITY METHODS
+    // -----------------------------------------------------------------
     
     /**
      * Get current admissions (not discharged)
@@ -307,16 +318,16 @@ class Admission {
         try {
             $stmt = $this->pdo->prepare("
                 SELECT a.*, p.name as patient_name, p.phone as patient_phone,
-                       r.room_type, r.daily_cost, b.bed_no, b.bed_type
+                        r.room_type, r.daily_cost
                 FROM admission a
                 JOIN patient p ON a.patient_id = p.patient_id
                 LEFT JOIN room r ON a.room_id = r.room_id
-                LEFT JOIN bed b ON a.bed_id = b.bed_id
                 WHERE a.discharge_date IS NULL
                 ORDER BY a.admission_date DESC
             ");
+            
             $stmt->execute();
-            return $stmt->fetchAll();
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
         } catch (PDOException $e) {
             error_log("Admission getCurrentAdmissions error: " . $e->getMessage());
             return [];
@@ -328,6 +339,7 @@ class Admission {
      */
     public function getStatistics() {
         try {
+            // Using CURDATE() which is SQL function for current date without time
             $stmt = $this->pdo->prepare("
                 SELECT 
                     COUNT(*) as total,
@@ -337,7 +349,7 @@ class Admission {
                 FROM admission
             ");
             $stmt->execute();
-            return $stmt->fetch();
+            return $stmt->fetch(PDO::FETCH_ASSOC);
         } catch (PDOException $e) {
             error_log("Admission getStatistics error: " . $e->getMessage());
             return [
@@ -360,9 +372,17 @@ class Admission {
             }
             
             $admissionDate = new DateTime($admission['admission_date']);
+            // If discharge_date is null, use the current time for calculation
             $dischargeDate = $admission['discharge_date'] ? new DateTime($admission['discharge_date']) : new DateTime();
             
-            $days = $admissionDate->diff($dischargeDate)->days + 1;
+            // Calculate total days, ensuring at least 1 day for a same-day admission/discharge
+            $interval = $admissionDate->diff($dischargeDate);
+            $days = $interval->days;
+            // Add 1 to count the first day, or if discharge is on the same day (diff days=0, total days=1)
+            if ($admission['discharge_date'] === null || $days == 0) {
+                $days = 1;
+            }
+
             $dailyCost = $admission['daily_cost'] ?? 0;
             
             return $days * $dailyCost;
@@ -375,7 +395,7 @@ class Admission {
     /**
      * Validate admission data
      */
-    public function validate($data) {
+    public function validate($data, $isUpdate = false) {
         $errors = [];
         
         if (empty($data['admission_date'])) {
@@ -391,26 +411,19 @@ class Admission {
         if (empty($data['room_id'])) {
             $errors[] = 'Room assignment is required';
         }
+
+        // Only check for active admission on CREATE operations
+        if (!$isUpdate && !empty($data['patient_id'])) {
+            if ($this->isActiveAdmission($data['patient_id'])) {
+                $errors[] = 'This patient already has an active admission.';
+            }
+        }
         
-        // If a specific bed is provided, verify it belongs to the selected room and is available
-        if (!empty($data['bed_id'])) {
-            try {
-                $stmt = $this->pdo->prepare("SELECT room_id, bed_status FROM bed WHERE bed_id = ?");
-                $stmt->execute([$data['bed_id']]);
-                $bed = $stmt->fetch();
-                if (!$bed) {
-                    $errors[] = 'Invalid bed selected';
-                } else {
-                    if (!empty($data['room_id']) && (int)$bed['room_id'] !== (int)$data['room_id']) {
-                        $errors[] = 'Selected bed does not belong to the chosen room';
-                    }
-                    if ($bed['bed_status'] !== 'Available') {
-                        $errors[] = 'Selected bed is not available';
-                    }
-                }
-            } catch (PDOException $e) {
-                error_log('Admission validate bed check error: ' . $e->getMessage());
-                $errors[] = 'Unable to validate bed selection';
+        // Final sanity check before admission
+        if (empty($errors) && !$isUpdate && !empty($data['room_id'])) {
+            $roomData = $this->getRoomOccupancy($data['room_id']);
+            if (!$roomData || (int)$roomData['occupied_slots'] >= (int)$roomData['bed_stock']) {
+                $errors[] = 'The selected room is full or does not exist.';
             }
         }
         

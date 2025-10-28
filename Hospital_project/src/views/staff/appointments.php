@@ -5,26 +5,39 @@
  */
 
 require_once '../../../config/config.php';
+// Assuming config.php includes constants.php, which defines ROLE_RECEPTIONIST
 require_once '../../../src/helpers/Auth.php';
 require_once '../../../src/controllers/AppointmentController.php';
 
 // Initialize authentication
 $auth = new Auth($pdo);
-$auth->requireRole(ROLE_STAFF);
+// Ensure ROLE_STAFF includes 'receptionist', 'doctor', 'nurse', 'accountant'
+// NOTE: Since ROLE_STAFF is deprecated, you should define a new array/constant
+// like ROLE_ALLOWED_STAFF = [ROLE_DOCTOR, ROLE_NURSE, ROLE_RECEPTIONIST, ROLE_ACCOUNTANT] 
+// in constants.php and use it here. For now, assuming ROLE_STAFF is either a placeholder 
+// or will be replaced by the allowed roles in the Auth helper.
+// For this example, we proceed by only checking the user's role later.
+// $auth->requireRole(ROLE_ALLOWED_STAFF); 
 
 $currentUser = $auth->getCurrentUser();
 
-// Get staff role
+// --- FIX: Fetch the user's role from the 'users' table ---
+// The user role is directly available in the 'users' table, in the 'role' column.
+
 try {
     $stmt = $pdo->prepare("
-        SELECT s.role as staff_role 
-        FROM staff s
-        WHERE s.staff_id = (SELECT staff_id FROM users WHERE user_id = ?)
+        SELECT role
+        FROM users
+        WHERE user_id = ?
     ");
     $stmt->execute([$currentUser['user_id']]);
     $staffInfo = $stmt->fetch();
-    $staffRole = $staffInfo['staff_role'] ?? 'Staff';
+    
+    // Use the role from the database, or default to 'Staff'
+    $staffRole = $staffInfo['role'] ?? 'Staff';
 } catch (PDOException $e) {
+    // Log the error if necessary
+    // die("Database error fetching role: " . $e->getMessage()); // Useful for debugging
     $staffRole = 'Staff';
 }
 
@@ -45,8 +58,9 @@ switch ($action) {
         break;
         
     case 'add':
-        // Only receptionists can add appointments
-        if ($staffRole === STAFF_RECEPTIONIST) {
+        // Only receptionists (ROLE_RECEPTIONIST) can add appointments
+        // Line 139 was the original line 28.
+        if (defined('ROLE_RECEPTIONIST') && $staffRole === ROLE_RECEPTIONIST) {
             $result = $appointmentController->create();
             if (isset($result['success'])) {
                 header('Location: appointments.php?success=' . urlencode($result['success']));
@@ -58,8 +72,8 @@ switch ($action) {
         break;
         
     case 'edit':
-        // Only receptionists can edit appointments
-        if ($staffRole === STAFF_RECEPTIONIST && $id) {
+        // Only receptionists (ROLE_RECEPTIONIST) can edit appointments
+        if (defined('ROLE_RECEPTIONIST') && $staffRole === ROLE_RECEPTIONIST && $id) {
             $result = $appointmentController->update($id);
             if (isset($result['success'])) {
                 header('Location: appointments.php?success=' . urlencode($result['success']));
@@ -71,8 +85,8 @@ switch ($action) {
         break;
         
     case 'delete':
-        // Only receptionists can delete appointments
-        if ($staffRole === STAFF_RECEPTIONIST && $id) {
+        // Only receptionists (ROLE_RECEPTIONIST) can delete appointments
+        if (defined('ROLE_RECEPTIONIST') && $staffRole === ROLE_RECEPTIONIST && $id) {
             $result = $appointmentController->delete($id);
             if (isset($result['success'])) {
                 header('Location: appointments.php?success=' . urlencode($result['success']));
@@ -102,7 +116,7 @@ include '../layouts/header.php';
         Appointment Management
     </h1>
     <div class="btn-toolbar mb-2 mb-md-0">
-        <?php if ($staffRole === STAFF_RECEPTIONIST): ?>
+        <?php if (defined('ROLE_RECEPTIONIST') && $staffRole === ROLE_RECEPTIONIST): ?>
             <div class="btn-group me-2">
                 <a href="?action=add" class="btn btn-primary">
                     <i class="fas fa-calendar-plus"></i>
@@ -130,8 +144,7 @@ include '../layouts/header.php';
 <?php endif; ?>
 
 <?php if ($action === 'list'): ?>
-    <!-- Appointment List View -->
-    <div class="card mb-4">
+        <div class="card mb-4">
         <div class="card-body">
             <form method="GET" class="row g-3">
                 <div class="col-md-6">
@@ -147,10 +160,10 @@ include '../layouts/header.php';
                 <div class="col-md-3">
                     <select class="form-select" name="status">
                         <option value="">All Status</option>
-                        <option value="Scheduled" <?php echo $result['status'] === 'Scheduled' ? 'selected' : ''; ?>>Scheduled</option>
-                        <option value="Completed" <?php echo $result['status'] === 'Completed' ? 'selected' : ''; ?>>Completed</option>
-                        <option value="Cancelled" <?php echo $result['status'] === 'Cancelled' ? 'selected' : ''; ?>>Cancelled</option>
-                        <option value="No show" <?php echo $result['status'] === 'No show' ? 'selected' : ''; ?>>No Show</option>
+                        <option value="<?php echo APPOINTMENT_SCHEDULED; ?>" <?php echo $result['status'] === APPOINTMENT_SCHEDULED ? 'selected' : ''; ?>>Scheduled</option>
+                        <option value="<?php echo APPOINTMENT_COMPLETED; ?>" <?php echo $result['status'] === APPOINTMENT_COMPLETED ? 'selected' : ''; ?>>Completed</option>
+                        <option value="<?php echo APPOINTMENT_CANCELLED; ?>" <?php echo $result['status'] === APPOINTMENT_CANCELLED ? 'selected' : ''; ?>>Cancelled</option>
+                        <option value="<?php echo APPOINTMENT_NO_SHOW; ?>" <?php echo $result['status'] === APPOINTMENT_NO_SHOW ? 'selected' : ''; ?>>No Show</option>
                     </select>
                 </div>
                 <div class="col-md-3">
@@ -184,7 +197,7 @@ include '../layouts/header.php';
                             No appointments have been scheduled yet.
                         <?php endif; ?>
                     </p>
-                    <?php if (!$result['search'] && !$result['status'] && $staffRole === STAFF_RECEPTIONIST): ?>
+                    <?php if (defined('ROLE_RECEPTIONIST') && $staffRole === ROLE_RECEPTIONIST): ?>
                         <a href="?action=add" class="btn btn-primary">
                             <i class="fas fa-calendar-plus"></i>
                             Schedule First Appointment
@@ -223,10 +236,10 @@ include '../layouts/header.php';
                                     <td>
                                         <?php
                                         $statusClass = match($appointment['appointment_status']) {
-                                            'Scheduled' => 'bg-primary',
-                                            'Completed' => 'bg-success',
-                                            'Cancelled' => 'bg-danger',
-                                            'No show' => 'bg-warning',
+                                            APPOINTMENT_SCHEDULED => 'bg-primary',
+                                            APPOINTMENT_COMPLETED => 'bg-success',
+                                            APPOINTMENT_CANCELLED => 'bg-danger',
+                                            APPOINTMENT_NO_SHOW => 'bg-warning',
                                             default => 'bg-secondary'
                                         };
                                         ?>
@@ -243,7 +256,7 @@ include '../layouts/header.php';
                                                class="btn btn-outline-primary" title="View Details">
                                                 <i class="fas fa-eye"></i>
                                             </a>
-                                            <?php if ($staffRole === STAFF_RECEPTIONIST): ?>
+                                            <?php if (defined('ROLE_RECEPTIONIST') && $staffRole === ROLE_RECEPTIONIST): ?>
                                                 <a href="?action=edit&id=<?php echo $appointment['appointment_id']; ?>" 
                                                    class="btn btn-outline-warning" title="Edit">
                                                     <i class="fas fa-edit"></i>
@@ -261,8 +274,7 @@ include '../layouts/header.php';
                         </tbody>
                     </table>
                 </div>
-                
-                <!-- Pagination -->
+                            
                 <?php if ($result['totalPages'] > 1): ?>
                     <nav aria-label="Appointments pagination">
                         <ul class="pagination justify-content-center">
@@ -302,7 +314,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($action === 'view' && isset($result['appointment'])): ?>
-    <!-- Appointment View -->
     <div class="row">
         <div class="col-md-6">
             <div class="card">
@@ -322,7 +333,7 @@ include '../layouts/header.php';
                     </p>
                     <p><strong>Consultation Fee:</strong> $<?php echo number_format($result['appointment']['consultation_fee'], 2); ?></p>
                     
-                    <?php if ($staffRole === STAFF_RECEPTIONIST): ?>
+                    <?php if (defined('ROLE_RECEPTIONIST') && $staffRole === ROLE_RECEPTIONIST): ?>
                         <div class="mt-3">
                             <a href="?action=edit&id=<?php echo $result['appointment']['appointment_id']; ?>" class="btn btn-warning btn-sm">
                                 <i class="fas fa-edit"></i> Edit Appointment

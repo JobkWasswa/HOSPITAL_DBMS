@@ -2,17 +2,48 @@
 /**
  * System Constants
  * Hospital Management System
+ * * MODIFIED to match the new consolidated 'users' table roles.
  */
 
-// User roles
-define('ROLE_DOCTOR', 'doctor');
-define('ROLE_STAFF', 'staff');
+// =================================================================
+// 1. User roles (Must match ENUM in users.role column)
+// =================================================================
 
-// Staff sub-roles
+// Primary Roles
+define('ROLE_DOCTOR', 'doctor');
+
+define('ROLE_NURSE', 'nurse'); 
+define('ROLE_RECEPTIONIST', 'receptionist');
+define('ROLE_ACCOUNTANT', 'accountant');
+
+// DEPRECATED: ROLE_STAFF is removed as all staff roles are now primary.
+// define('ROLE_STAFF', 'staff'); 
+
+
+// =================================================================
+// 2. Deprecated Bed/Staff Sub-Roles (REMOVED)
+// =================================================================
+/* // Staff sub-roles - DEPRECATED/REMOVED
 define('STAFF_NURSE', 'Nurse');
 define('STAFF_RECEPTIONIST', 'Receptionist');
 define('STAFF_ACCOUNTANT', 'Accountant');
 define('STAFF_CLEANER', 'Cleaner');
+
+// Bed types - DEPRECATED/REMOVED (Bed is consolidated/removed)
+define('BED_STANDARD', 'Standard');
+define('BED_ICU', 'ICU');
+define('BED_EMERGENCY', 'Emergency');
+
+// Bed status - DEPRECATED/REMOVED
+define('BED_AVAILABLE', 'Available');
+define('BED_OCCUPIED', 'Occupied');
+define('BED_MAINTENANCE', 'Maintenance');
+*/
+
+
+// =================================================================
+// 3. Other Constants (Kept as they appear valid for other tables)
+// =================================================================
 
 // Appointment status
 define('APPOINTMENT_SCHEDULED', 'Scheduled');
@@ -40,22 +71,12 @@ define('ROOM_AVAILABLE', 'Available');
 define('ROOM_OCCUPIED', 'Occupied');
 define('ROOM_MAINTENANCE', 'Maintenance');
 
-// Bed types
-define('BED_STANDARD', 'Standard');
-define('BED_ICU', 'ICU');
-define('BED_EMERGENCY', 'Emergency');
-
-// Bed status
-define('BED_AVAILABLE', 'Available');
-define('BED_OCCUPIED', 'Occupied');
-define('BED_MAINTENANCE', 'Maintenance');
-
 // Gender options
 define('GENDER_MALE', 'Male');
 define('GENDER_FEMALE', 'Female');
 define('GENDER_OTHER', 'Other');
 
-// Shift types
+// Shift types (Match ENUM in users.shift column)
 define('SHIFT_MORNING', 'Morning');
 define('SHIFT_EVENING', 'Evening');
 define('SHIFT_NIGHT', 'Night');

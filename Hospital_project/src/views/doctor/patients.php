@@ -16,17 +16,21 @@ $currentUser = $auth->getCurrentUser();
 
 // Get doctor information
 try {
+    // CRITICAL FIX: The original query used `doctor_id = (SELECT doctor_id FROM users WHERE user_id = ?)`.
+    // The correct approach is to join the `doctor` table using the `user_id` from the session.
     $stmt = $pdo->prepare("
         SELECT d.name as doctor_name, d.specialization, d.doctor_id
         FROM doctor d
-        WHERE d.doctor_id = (SELECT doctor_id FROM users WHERE user_id = ?)
+        WHERE d.user_id = ?
     ");
     $stmt->execute([$currentUser['user_id']]);
-    $doctorInfo = $stmt->fetch();
+    $doctorInfo = $stmt->fetch(PDO::FETCH_ASSOC); // Fetch as associative array for consistency
     $doctorName = $doctorInfo['doctor_name'] ?? 'Doctor';
     $specialization = $doctorInfo['specialization'] ?? 'General';
     $doctorId = $doctorInfo['doctor_id'] ?? null;
 } catch (PDOException $e) {
+    // Log error but provide defaults to prevent page crash
+    error_log("Error fetching doctor info in patients.php: " . $e->getMessage());
     $doctorName = 'Doctor';
     $specialization = 'General';
     $doctorId = null;
@@ -42,6 +46,8 @@ $id = $_GET['id'] ?? null;
 switch ($action) {
     case 'view':
         if ($id) {
+            // NOTE: The current logic fetches ALL patient data via $patientController->view($id).
+            // No scope enforcement is applied here (i.e., doctor can see all patients).
             $result = $patientController->view($id);
         } else {
             $result = ['error' => 'Patient ID required'];
@@ -49,6 +55,8 @@ switch ($action) {
         break;
         
     default:
+        // NOTE: The current logic fetches ALL patients via $patientController->index().
+        // If the goal was only to see *their* patients, the controller call would need a filter: $patientController->index($doctorId);
         $result = $patientController->index();
         break;
 }
@@ -93,7 +101,6 @@ include '../layouts/header.php';
 <?php endif; ?>
 
 <?php if ($action === 'list'): ?>
-    <!-- Patient List View -->
     <div class="card mb-4">
         <div class="card-body">
             <form method="GET" class="row g-3">
@@ -104,7 +111,7 @@ include '../layouts/header.php';
                         </span>
                         <input type="text" class="form-control" name="search" 
                                placeholder="Search by name or phone..." 
-                               value="<?php echo htmlspecialchars($result['search']); ?>">
+                               value="<?php echo htmlspecialchars($result['search'] ?? ''); ?>">
                     </div>
                 </div>
                 <div class="col-md-4">
@@ -123,7 +130,7 @@ include '../layouts/header.php';
         <div class="card-header">
             <h5 class="card-title mb-0">
                 All Patients
-                <span class="badge bg-primary ms-2"><?php echo $result['totalPatients']; ?> total</span>
+                <span class="badge bg-primary ms-2"><?php echo $result['totalPatients'] ?? 0; ?> total</span>
             </h5>
         </div>
         <div class="card-body">
@@ -132,7 +139,7 @@ include '../layouts/header.php';
                     <i class="fas fa-users fa-3x text-muted mb-3"></i>
                     <h4 class="text-muted">No patients found</h4>
                     <p class="text-muted">
-                        <?php if ($result['search']): ?>
+                        <?php if (isset($result['search']) && $result['search']): ?>
                             No patients match your search criteria.
                         <?php else: ?>
                             No patients have been registered yet.
@@ -155,7 +162,8 @@ include '../layouts/header.php';
                         <tbody>
                             <?php foreach ($result['patients'] as $patient): ?>
                                 <?php
-                                $age = date_diff(date_create($patient['DOB']), date_create('today'))->y;
+                                // Ensure DOB exists before calculating age
+                                $age = isset($patient['DOB']) ? date_diff(date_create($patient['DOB']), date_create('today'))->y : 'N/A';
                                 ?>
                                 <tr>
                                     <td>
@@ -193,13 +201,12 @@ include '../layouts/header.php';
                     </table>
                 </div>
                 
-                <!-- Pagination -->
-                <?php if ($result['totalPages'] > 1): ?>
+                <?php if (($result['totalPages'] ?? 0) > 1): ?>
                     <nav aria-label="Patients pagination">
                         <ul class="pagination justify-content-center">
                             <?php if ($result['currentPage'] > 1): ?>
                                 <li class="page-item">
-                                    <a class="page-link" href="?search=<?php echo urlencode($result['search']); ?>&page=<?php echo $result['currentPage'] - 1; ?>">
+                                    <a class="page-link" href="?search=<?php echo urlencode($result['search'] ?? ''); ?>&page=<?php echo $result['currentPage'] - 1; ?>">
                                         <i class="fas fa-chevron-left"></i> Previous
                                     </a>
                                 </li>
@@ -212,7 +219,7 @@ include '../layouts/header.php';
                             for ($i = $startPage; $i <= $endPage; $i++):
                             ?>
                                 <li class="page-item <?php echo $i === $result['currentPage'] ? 'active' : ''; ?>">
-                                    <a class="page-link" href="?search=<?php echo urlencode($result['search']); ?>&page=<?php echo $i; ?>">
+                                    <a class="page-link" href="?search=<?php echo urlencode($result['search'] ?? ''); ?>&page=<?php echo $i; ?>">
                                         <?php echo $i; ?>
                                     </a>
                                 </li>
@@ -220,7 +227,7 @@ include '../layouts/header.php';
                             
                             <?php if ($result['currentPage'] < $result['totalPages']): ?>
                                 <li class="page-item">
-                                    <a class="page-link" href="?search=<?php echo urlencode($result['search']); ?>&page=<?php echo $result['currentPage'] + 1; ?>">
+                                    <a class="page-link" href="?search=<?php echo urlencode($result['search'] ?? ''); ?>&page=<?php echo $result['currentPage'] + 1; ?>">
                                         Next <i class="fas fa-chevron-right"></i>
                                     </a>
                                 </li>
@@ -233,7 +240,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($action === 'view' && isset($result['patient'])): ?>
-    <!-- Patient View -->
     <div class="row">
         <div class="col-md-4">
             <div class="card">
@@ -262,7 +268,6 @@ include '../layouts/header.php';
         </div>
         
         <div class="col-md-8">
-            <!-- Medical History -->
             <div class="card mb-4">
                 <div class="card-header">
                     <h5 class="card-title mb-0">Medical History</h5>
@@ -295,7 +300,6 @@ include '../layouts/header.php';
                 </div>
             </div>
             
-            <!-- Recent Treatments -->
             <div class="card">
                 <div class="card-header">
                     <h5 class="card-title mb-0">Recent Treatments</h5>

@@ -2,47 +2,55 @@
 /**
  * Staff Dashboard
  * Hospital Management System
+ * FIX: Updated for consolidated 'users' table and multiple staff roles.
  */
 
 require_once '../../../config/config.php';
+// Make sure you include the constants file so ROLE_NURSE, etc., are available
+require_once '../../../config/constants.php'; 
 require_once '../../../src/helpers/Auth.php';
 
 // Initialize authentication
 $auth = new Auth($pdo);
 
-// Require staff role
-$auth->requireRole(ROLE_STAFF);
+// 1. FIX: Use requireRoles() to allow access for all non-Doctor staff roles.
+$allowedStaffRoles = [ROLE_NURSE, ROLE_RECEPTIONIST, ROLE_ACCOUNTANT];
+$auth->requireRoles($allowedStaffRoles);
 
 $currentUser = $auth->getCurrentUser();
 
-// Get staff role from database
+// The user's role is now directly in $currentUser['role']
+$staffRole = $currentUser['role'];
+$staffName = $currentUser['name'];
+
+// 2. FIX: Simplified SQL query to get the department name directly from the users table.
 try {
+    // Select the department name by joining users with department
     $stmt = $pdo->prepare("
-        SELECT s.role as staff_role, s.name as staff_name, d.name as department_name
-        FROM staff s
-        LEFT JOIN department d ON s.department_id = d.department_id
-        WHERE s.staff_id = (SELECT staff_id FROM users WHERE user_id = ?)
+        SELECT d.name as department_name
+        FROM users u
+        LEFT JOIN department d ON u.department_id = d.department_id
+        WHERE u.user_id = ?
     ");
     $stmt->execute([$currentUser['user_id']]);
-    $staffInfo = $stmt->fetch();
+    $departmentInfo = $stmt->fetch();
     
-    $staffRole = $staffInfo['staff_role'] ?? 'Staff';
-    $staffName = $staffInfo['staff_name'] ?? $currentUser['username'];
-    $departmentName = $staffInfo['department_name'] ?? 'General';
+    $departmentName = $departmentInfo['department_name'] ?? 'General';
     
 } catch (PDOException $e) {
-    error_log("Staff dashboard error: " . $e->getMessage());
-    $staffRole = 'Staff';
-    $staffName = $currentUser['username'];
+    error_log("Staff dashboard department error: " . $e->getMessage());
     $departmentName = 'General';
 }
+
+// 3. FIX: Use the primary ROLE constants (ROLE_NURSE, ROLE_RECEPTIONIST, ROLE_ACCOUNTANT) 
+// for conditional checks, since 'STAFF_NURSE' etc., are deprecated.
 
 // Get dashboard statistics based on staff role
 try {
     $stats = [];
     
-    if ($staffRole === STAFF_RECEPTIONIST) {
-        // Receptionist stats
+    if ($staffRole === ROLE_RECEPTIONIST) {
+        // Receptionist stats (Use ROLE_RECEPTIONIST)
         $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM patient WHERE DATE(created_at) = CURDATE()");
         $stmt->execute();
         $stats['new_patients'] = $stmt->fetch()['count'];
@@ -51,28 +59,30 @@ try {
         $stmt->execute();
         $stats['today_appointments'] = $stmt->fetch()['count'];
         
-    } elseif ($staffRole === STAFF_NURSE) {
-        // Nurse stats
+    } elseif ($staffRole === ROLE_NURSE) {
+        // Nurse stats (Use ROLE_NURSE)
         $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM admission WHERE discharge_date IS NULL");
         $stmt->execute();
         $stats['current_admissions'] = $stmt->fetch()['count'];
         
-        $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM bed WHERE bed_status = 'Available'");
+        // Note: You have a 'room' table with 'bed_stock', not a 'bed' table. Using 'room' table logic.
+        $stmt = $pdo->prepare("SELECT SUM(bed_stock) as total_beds, SUM(CASE WHEN room_status = 'Available' THEN bed_stock ELSE 0 END) as available_beds_count FROM room");
         $stmt->execute();
-        $stats['available_beds'] = $stmt->fetch()['count'];
+        $bedStats = $stmt->fetch();
+        $stats['available_beds'] = $bedStats['available_beds_count'] ?? 0;
         
-    } elseif ($staffRole === STAFF_ACCOUNTANT) {
-        // Accountant stats
-        $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM payment WHERE payment_status = 'Pending'");
+    } elseif ($staffRole === ROLE_ACCOUNTANT) {
+        // Accountant stats (Use ROLE_ACCOUNTANT)
+        $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM payment WHERE payment_status = '" . PAYMENT_PENDING . "'");
         $stmt->execute();
         $stats['pending_payments'] = $stmt->fetch()['count'];
         
-        $stmt = $pdo->prepare("SELECT SUM(total_amount) as total FROM payment WHERE payment_status = 'Paid' AND DATE(payment_date) = CURDATE()");
+        $stmt = $pdo->prepare("SELECT SUM(total_amount) as total FROM payment WHERE payment_status = '" . PAYMENT_PAID . "' AND DATE(payment_date) = CURDATE()");
         $stmt->execute();
         $stats['today_revenue'] = $stmt->fetch()['total'] ?? 0;
         
     } else {
-        // General staff stats
+        // General staff stats (Shouldn't be hit, but good fallback)
         $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM patient");
         $stmt->execute();
         $stats['total_patients'] = $stmt->fetch()['count'];
@@ -105,23 +115,20 @@ include '../layouts/header.php';
     </div>
 </div>
 
-<!-- Welcome Message -->
 <div class="alert alert-info" role="alert">
     <h4 class="alert-heading">
         <i class="fas fa-user-tie"></i>
         Welcome, <?php echo htmlspecialchars($staffName); ?>!
     </h4>
     <p class="mb-0">
-        Role: <?php echo htmlspecialchars($staffRole); ?> | 
+        Role: <?php echo htmlspecialchars(ucwords($staffRole)); ?> | 
         Department: <?php echo htmlspecialchars($departmentName); ?> | 
         Last login: <?php echo date('M j, Y H:i', $_SESSION['login_time']); ?>
     </p>
 </div>
 
-<!-- Statistics Cards -->
 <div class="row mb-4">
-    <?php if ($staffRole === STAFF_RECEPTIONIST): ?>
-        <!-- Receptionist Stats -->
+    <?php if ($staffRole === ROLE_RECEPTIONIST): // Use primary role constant ?>
         <div class="col-xl-3 col-md-6 mb-4">
             <div class="card border-left-primary shadow h-100 py-2">
                 <div class="card-body">
@@ -162,8 +169,7 @@ include '../layouts/header.php';
             </div>
         </div>
         
-    <?php elseif ($staffRole === STAFF_NURSE): ?>
-        <!-- Nurse Stats -->
+    <?php elseif ($staffRole === ROLE_NURSE): // Use primary role constant ?>
         <div class="col-xl-3 col-md-6 mb-4">
             <div class="card border-left-primary shadow h-100 py-2">
                 <div class="card-body">
@@ -204,8 +210,7 @@ include '../layouts/header.php';
             </div>
         </div>
         
-    <?php elseif ($staffRole === STAFF_ACCOUNTANT): ?>
-        <!-- Accountant Stats -->
+    <?php elseif ($staffRole === ROLE_ACCOUNTANT): // Use primary role constant ?>
         <div class="col-xl-3 col-md-6 mb-4">
             <div class="card border-left-warning shadow h-100 py-2">
                 <div class="card-body">
@@ -247,7 +252,6 @@ include '../layouts/header.php';
         </div>
         
     <?php else: ?>
-        <!-- General Staff Stats -->
         <div class="col-xl-3 col-md-6 mb-4">
             <div class="card border-left-primary shadow h-100 py-2">
                 <div class="card-body">
@@ -289,7 +293,6 @@ include '../layouts/header.php';
         </div>
     <?php endif; ?>
     
-    <!-- Common stats for all staff -->
     <div class="col-xl-3 col-md-6 mb-4">
         <div class="card border-left-info shadow h-100 py-2">
             <div class="card-body">
@@ -331,7 +334,6 @@ include '../layouts/header.php';
     </div>
 </div>
 
-<!-- Quick Actions -->
 <div class="row mb-4">
     <div class="col-12">
         <div class="card">
@@ -342,8 +344,7 @@ include '../layouts/header.php';
             </div>
             <div class="card-body">
                 <div class="row">
-                    <?php if ($staffRole === STAFF_RECEPTIONIST): ?>
-                        <!-- Receptionist Quick Actions -->
+                    <?php if ($staffRole === ROLE_RECEPTIONIST): // Use primary role constant ?>
                         <div class="col-md-3 mb-3">
                             <a href="patients.php?action=add" class="btn btn-primary w-100">
                                 <i class="fas fa-user-plus"></i><br>
@@ -369,8 +370,7 @@ include '../layouts/header.php';
                             </a>
                         </div>
                         
-                    <?php elseif ($staffRole === STAFF_NURSE): ?>
-                        <!-- Nurse Quick Actions -->
+                    <?php elseif ($staffRole === ROLE_NURSE): // Use primary role constant ?>
                         <div class="col-md-3 mb-3">
                             <a href="admissions.php?action=add" class="btn btn-primary w-100">
                                 <i class="fas fa-user-plus"></i><br>
@@ -396,8 +396,7 @@ include '../layouts/header.php';
                             </a>
                         </div>
                         
-                    <?php elseif ($staffRole === STAFF_ACCOUNTANT): ?>
-                        <!-- Accountant Quick Actions -->
+                    <?php elseif ($staffRole === ROLE_ACCOUNTANT): // Use primary role constant ?>
                         <div class="col-md-3 mb-3">
                             <a href="billing.php?action=add" class="btn btn-primary w-100">
                                 <i class="fas fa-plus"></i><br>
@@ -424,7 +423,6 @@ include '../layouts/header.php';
                         </div>
                         
                     <?php else: ?>
-                        <!-- General Staff Quick Actions -->
                         <div class="col-md-3 mb-3">
                             <a href="patients.php" class="btn btn-primary w-100">
                                 <i class="fas fa-users"></i><br>
@@ -456,7 +454,6 @@ include '../layouts/header.php';
     </div>
 </div>
 
-<!-- Recent Activity -->
 <div class="row">
     <div class="col-12">
         <div class="card">
@@ -477,6 +474,7 @@ include '../layouts/header.php';
 </div>
 
 <style>
+/* ... (CSS remains the same) ... */
 .border-left-primary {
     border-left: 0.25rem solid #4e73df !important;
 }

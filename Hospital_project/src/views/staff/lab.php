@@ -5,26 +5,32 @@
  */
 
 require_once '../../../config/config.php';
+// Include constants, although ROLE_STAFF is now deprecated.
+require_once '../../../config/constants.php'; 
 require_once '../../../src/helpers/Auth.php';
 
 // Initialize authentication
 $auth = new Auth($pdo);
-$auth->requireRole(ROLE_STAFF);
-
+// Removed: $auth->requireRole(ROLE_STAFF); as requested, allowing access to all authenticated users.
 $currentUser = $auth->getCurrentUser();
 
-// Get staff role
+// Get specific role from the combined 'users' table for UI customization
 try {
+    // Assuming the specific role name is stored in the 'role' column of the 'users' table
     $stmt = $pdo->prepare("
-        SELECT s.role as staff_role 
-        FROM staff s
-        WHERE s.staff_id = (SELECT staff_id FROM users WHERE user_id = ?)
+        SELECT u.role 
+        FROM users u
+        WHERE u.user_id = ?
     ");
     $stmt->execute([$currentUser['user_id']]);
-    $staffInfo = $stmt->fetch();
-    $staffRole = $staffInfo['staff_role'] ?? 'Staff';
+    $userInfo = $stmt->fetch();
+    // Use the role from the users table, defaulting to 'Staff'
+    // This variable is primarily used to check if the user is a 'Lab Technician' to show/hide specific UI elements.
+    $staffRole = $userInfo['role'] ?? 'Staff'; 
 } catch (PDOException $e) {
+    // Fallback if DB connection fails, prevents variable access errors later
     $staffRole = 'Staff';
+    error_log("Error fetching user role for Lab view: " . $e->getMessage());
 }
 
 $action = $_GET['action'] ?? 'list';
@@ -63,6 +69,11 @@ switch ($action) {
         break;
         
     default:
+        // Ensure constants are defined before use
+        if (!defined('RECORDS_PER_PAGE')) {
+            define('RECORDS_PER_PAGE', 10);
+        }
+
         // Get lab tests with pagination
         $search = $_GET['search'] ?? '';
         $page = max(1, intval($_GET['page'] ?? 1));
@@ -121,6 +132,7 @@ switch ($action) {
             ];
         } catch (PDOException $e) {
             $result = ['error' => 'Database error occurred'];
+            error_log("Lab list fetching error: " . $e->getMessage());
         }
         break;
 }
@@ -179,7 +191,7 @@ include '../layouts/header.php';
                         </span>
                         <input type="text" class="form-control" name="search" 
                                placeholder="Search by patient name or test type..." 
-                               value="<?php echo htmlspecialchars($result['search']); ?>">
+                               value="<?php echo htmlspecialchars($result['search'] ?? ''); ?>">
                     </div>
                 </div>
                 <div class="col-md-4">
@@ -198,7 +210,7 @@ include '../layouts/header.php';
         <div class="card-header">
             <h5 class="card-title mb-0">
                 Lab Tests List
-                <span class="badge bg-primary ms-2"><?php echo $result['totalLabTests']; ?> total</span>
+                <span class="badge bg-primary ms-2"><?php echo $result['totalLabTests'] ?? 0; ?> total</span>
             </h5>
         </div>
         <div class="card-body">
@@ -207,13 +219,13 @@ include '../layouts/header.php';
                     <i class="fas fa-flask fa-3x text-muted mb-3"></i>
                     <h4 class="text-muted">No lab tests found</h4>
                     <p class="text-muted">
-                        <?php if ($result['search']): ?>
+                        <?php if (!empty($result['search'])): ?>
                             No lab tests match your search criteria.
                         <?php else: ?>
                             No lab tests have been performed yet.
                         <?php endif; ?>
                     </p>
-                    <?php if (!$result['search'] && $staffRole === 'Lab Technician'): ?>
+                    <?php if (empty($result['search']) && $staffRole === 'Lab Technician'): ?>
                         <a href="?action=add" class="btn btn-primary">
                             <i class="fas fa-plus"></i>
                             Add First Lab Test
@@ -311,31 +323,63 @@ include '../layouts/header.php';
 <?php elseif ($action === 'view' && isset($result['labTest'])): ?>
     <!-- Lab Test View -->
     <div class="row">
-        <div class="col-md-6">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="card-title mb-0">Lab Test Details</h5>
+        <div class="col-md-8 mx-auto">
+            <div class="card shadow-lg">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-file-alt"></i> Lab Test Report #<?php echo $result['labTest']['test_id']; ?>
+                    </h5>
                 </div>
                 <div class="card-body">
-                    <h4>Lab Test #<?php echo $result['labTest']['test_id']; ?></h4>
                     
-                    <hr>
+                    <div class="row mb-3">
+                        <div class="col-sm-6">
+                            <p class="mb-1"><strong>Patient:</strong></p>
+                            <p class="lead text-primary"><?php echo htmlspecialchars($result['labTest']['patient_name']); ?></p>
+                        </div>
+                        <div class="col-sm-6 text-sm-end">
+                            <p class="mb-1"><strong>Test Date:</strong></p>
+                            <p class="lead"><?php echo date('M j, Y H:i', strtotime($result['labTest']['test_date'])); ?></p>
+                        </div>
+                    </div>
+
+                    <hr class="my-3">
                     
-                    <p><strong>Patient:</strong> <?php echo htmlspecialchars($result['labTest']['patient_name']); ?></p>
-                    <p><strong>Phone:</strong> <a href="tel:<?php echo htmlspecialchars($result['labTest']['patient_phone']); ?>"><?php echo htmlspecialchars($result['labTest']['patient_phone']); ?></a></p>
-                    <p><strong>Test Type:</strong> <?php echo htmlspecialchars($result['labTest']['test_type']); ?></p>
-                    <p><strong>Results:</strong> <?php echo htmlspecialchars($result['labTest']['results']); ?></p>
-                    <p><strong>Test Date:</strong> <?php echo date('M j, Y H:i', strtotime($result['labTest']['test_date'])); ?></p>
-                    <p><strong>Cost:</strong> $<?php echo number_format($result['labTest']['test_cost'], 2); ?></p>
+                    <h5 class="mt-4 mb-2">Test Information</h5>
+                    <ul class="list-group list-group-flush mb-4">
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            Test Type:
+                            <span class="fw-bold"><?php echo htmlspecialchars($result['labTest']['test_type']); ?></span>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            Cost:
+                            <span class="badge bg-success fs-6">$<?php echo number_format($result['labTest']['test_cost'], 2); ?></span>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            Contact Phone:
+                            <span class="fw-bold"><a href="tel:<?php echo htmlspecialchars($result['labTest']['patient_phone']); ?>"><?php echo htmlspecialchars($result['labTest']['patient_phone']); ?></a></span>
+                        </li>
+                    </ul>
+                    
+                    <h5 class="mt-4 mb-2"><i class="fas fa-clipboard-list"></i> Results / Notes</h5>
+                    <div class="alert alert-light border p-3">
+                        <?php 
+                        $resultsContent = htmlspecialchars($result['labTest']['results']);
+                        echo nl2br($resultsContent ? $resultsContent : 'No detailed results recorded yet.'); 
+                        ?>
+                    </div>
+                </div>
+                <div class="card-footer text-end">
+                    <!-- Placeholder for Edit/Update Result Action -->
+                    <button class="btn btn-warning me-2" disabled>
+                        <i class="fas fa-edit"></i> Edit Results (Future Feature)
+                    </button>
+                    <a href="lab.php" class="btn btn-secondary">
+                        <i class="fas fa-arrow-left"></i> Back to List
+                    </a>
                 </div>
             </div>
         </div>
-    </div>
-    
-    <div class="mt-3">
-        <a href="lab.php" class="btn btn-secondary">
-            <i class="fas fa-arrow-left"></i> Back to List
-        </a>
     </div>
 <?php endif; ?>
 

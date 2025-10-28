@@ -1,32 +1,32 @@
 <?php
 /**
- * Billing Management - Staff View
+ * Billing Management - Staff View (Accountant)
  * Hospital Management System
+ * * FIX: Updated to use consolidated 'users' table and 'ROLE_ACCOUNTANT' constant.
  */
 
 require_once '../../../config/config.php';
 require_once '../../../src/helpers/Auth.php';
-require_once '../../../src/models/Payment.php';
+// Assuming you still have a Payment model/class available
+require_once '../../../src/models/Payment.php'; 
+// Constants for roles and statuses are loaded via config/config.php -> config/constants.php
 
 // Initialize authentication
 $auth = new Auth($pdo);
-$auth->requireRole(ROLE_STAFF);
+
+// 1. FIX: Use ROLE_ACCOUNTANT for access check instead of deprecated ROLE_STAFF
+// This enforces that only the accountant can see the billing page.
+$auth->requireRole(ROLE_ACCOUNTANT);
 
 $currentUser = $auth->getCurrentUser();
 
-// Get staff role
-try {
-    $stmt = $pdo->prepare("
-        SELECT s.role as staff_role 
-        FROM staff s
-        WHERE s.staff_id = (SELECT staff_id FROM users WHERE user_id = ?)
-    ");
-    $stmt->execute([$currentUser['user_id']]);
-    $staffInfo = $stmt->fetch();
-    $staffRole = $staffInfo['staff_role'] ?? 'Staff';
-} catch (PDOException $e) {
-    $staffRole = 'Staff';
-}
+// 2. FIX: The staff role is now directly available from $currentUser['role'] 
+// (which is 'accountant' since requireRole passed)
+$staffRole = $currentUser['role'] ?? null; 
+
+// 3. FIX: Check for the required permission role using the constant
+// Since this page is specifically for the accountant, the permission role is ROLE_ACCOUNTANT.
+$REQUIRED_PERMISSION_ROLE = ROLE_ACCOUNTANT; 
 
 $action = $_GET['action'] ?? 'list';
 $id = $_GET['id'] ?? null;
@@ -36,6 +36,7 @@ switch ($action) {
     case 'view':
         if ($id) {
             try {
+                // Query remains valid as it uses payment and patient tables
                 $stmt = $pdo->prepare("
                     SELECT p.*, pt.name as patient_name, pt.phone as patient_phone
                     FROM payment p
@@ -59,11 +60,12 @@ switch ($action) {
         break;
         
     case 'add':
-        // Only accountants can add payments
-        if ($staffRole === STAFF_ACCOUNTANT) {
+        // 4. FIX: Use the new ROLE_ACCOUNTANT constant for permission check
+        if ($staffRole === $REQUIRED_PERMISSION_ROLE) {
             if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $data = [
                     'payment_method' => $_POST['payment_method'] ?? '',
+                    // Note: PAYMENT_PENDING should be defined in constants.php
                     'payment_status' => $_POST['payment_status'] ?? PAYMENT_PENDING,
                     'payment_date' => $_POST['payment_date'] ?? date('Y-m-d H:i:s'),
                     'patient_id' => intval($_POST['patient_id'] ?? 0)
@@ -87,7 +89,7 @@ switch ($action) {
                             $result = ['error' => 'Failed to create payment record'];
                         }
                     } catch (PDOException $e) {
-                        $result = ['error' => 'Database error occurred'];
+                        $result = ['error' => 'Database error occurred: ' . $e->getMessage()];
                     }
                 } else {
                     $result = ['errors' => $errors, 'data' => $data];
@@ -99,8 +101,8 @@ switch ($action) {
         break;
 
     case 'delete':
-        // Only accountants can delete payments
-        if ($staffRole === STAFF_ACCOUNTANT && $id) {
+        // 5. FIX: Use the new ROLE_ACCOUNTANT constant for permission check
+        if ($staffRole === $REQUIRED_PERMISSION_ROLE && $id) {
             try {
                 $paymentModel = new Payment($pdo);
                 if ($paymentModel->delete($id)) {
@@ -110,7 +112,7 @@ switch ($action) {
                     $result = ['error' => 'Failed to delete payment record'];
                 }
             } catch (PDOException $e) {
-                $result = ['error' => 'Database error occurred'];
+                $result = ['error' => 'Database error occurred: ' . $e->getMessage()];
             }
         } else {
             $result = ['error' => 'Access denied. Only accountants can delete payment records.'];
@@ -118,9 +120,10 @@ switch ($action) {
         break;
         
     case 'update_status':
-        // Only accountants can update payment status
-        if ($staffRole === STAFF_ACCOUNTANT && $id) {
+        // 6. FIX: Use the new ROLE_ACCOUNTANT constant for permission check
+        if ($staffRole === $REQUIRED_PERMISSION_ROLE && $id) {
             $newStatus = $_POST['status'] ?? '';
+            // Note: PAYMENT_* constants should be defined in constants.php
             if (in_array($newStatus, [PAYMENT_PENDING, PAYMENT_PAID, PAYMENT_DECLINED])) {
                 try {
                     $stmt = $pdo->prepare("UPDATE payment SET payment_status = ? WHERE bill_id = ?");
@@ -131,7 +134,7 @@ switch ($action) {
                         $result = ['error' => 'Failed to update payment status'];
                     }
                 } catch (PDOException $e) {
-                    $result = ['error' => 'Database error occurred'];
+                    $result = ['error' => 'Database error occurred: ' . $e->getMessage()];
                 }
             } else {
                 $result = ['error' => 'Invalid payment status'];
@@ -142,14 +145,16 @@ switch ($action) {
         break;
         
     default:
-        // Get payments with pagination
+        // Pagination logic (no role changes needed here)
         $search = $_GET['search'] ?? '';
         $status = $_GET['status'] ?? '';
+        // Note: RECORDS_PER_PAGE should be defined in config/constants.php
+        $limit = RECORDS_PER_PAGE ?? 20; 
         $page = max(1, intval($_GET['page'] ?? 1));
-        $limit = RECORDS_PER_PAGE;
         $offset = ($page - 1) * $limit;
         
         try {
+            // SQL queries remain the same as they only join payment and patient
             $sql = "
                 SELECT p.*, pt.name as patient_name, pt.phone as patient_phone
                 FROM payment p
@@ -228,7 +233,7 @@ include '../layouts/header.php';
         Billing Management
     </h1>
     <div class="btn-toolbar mb-2 mb-md-0">
-        <?php if ($staffRole === STAFF_ACCOUNTANT): ?>
+        <?php if ($staffRole === ROLE_ACCOUNTANT): ?>
             <div class="btn-group me-2">
                 <a href="?action=add" class="btn btn-primary">
                     <i class="fas fa-plus"></i>
@@ -256,7 +261,6 @@ include '../layouts/header.php';
 <?php endif; ?>
 
 <?php if ($action === 'list'): ?>
-    <!-- Payment List View -->
     <div class="card mb-4">
         <div class="card-body">
             <form method="GET" class="row g-3">
@@ -273,9 +277,9 @@ include '../layouts/header.php';
                 <div class="col-md-3">
                     <select class="form-select" name="status">
                         <option value="">All Status</option>
-                        <option value="Pending" <?php echo $result['status'] === 'Pending' ? 'selected' : ''; ?>>Pending</option>
-                        <option value="Paid" <?php echo $result['status'] === 'Paid' ? 'selected' : ''; ?>>Paid</option>
-                        <option value="Declined" <?php echo $result['status'] === 'Declined' ? 'selected' : ''; ?>>Declined</option>
+                        <option value="<?php echo PAYMENT_PENDING; ?>" <?php echo $result['status'] === PAYMENT_PENDING ? 'selected' : ''; ?>>Pending</option>
+                        <option value="<?php echo PAYMENT_PAID; ?>" <?php echo $result['status'] === PAYMENT_PAID ? 'selected' : ''; ?>>Paid</option>
+                        <option value="<?php echo PAYMENT_DECLINED; ?>" <?php echo $result['status'] === PAYMENT_DECLINED ? 'selected' : ''; ?>>Declined</option>
                     </select>
                 </div>
                 <div class="col-md-4">
@@ -309,7 +313,7 @@ include '../layouts/header.php';
                             No payment records have been created yet.
                         <?php endif; ?>
                     </p>
-                    <?php if (!$result['search'] && !$result['status'] && $staffRole === STAFF_ACCOUNTANT): ?>
+                    <?php if (!$result['search'] && !$result['status'] && $staffRole === ROLE_ACCOUNTANT): ?>
                         <a href="?action=add" class="btn btn-primary">
                             <i class="fas fa-plus"></i>
                             Create First Payment Record
@@ -347,10 +351,11 @@ include '../layouts/header.php';
                                     </td>
                                     <td>
                                         <?php
+                                        // Note: Assuming PAYEMENT_* constants are correctly defined.
                                         $statusClass = match($payment['payment_status']) {
-                                            'Pending' => 'bg-warning',
-                                            'Paid' => 'bg-success',
-                                            'Declined' => 'bg-danger',
+                                            PAYMENT_PENDING => 'bg-warning',
+                                            PAYMENT_PAID => 'bg-success',
+                                            PAYMENT_DECLINED => 'bg-danger',
                                             default => 'bg-secondary'
                                         };
                                         ?>
@@ -367,15 +372,15 @@ include '../layouts/header.php';
                                                class="btn btn-outline-primary" title="View Details">
                                                 <i class="fas fa-eye"></i>
                                             </a>
-                                            <?php if ($staffRole === STAFF_ACCOUNTANT): ?>
+                                            <?php if ($staffRole === ROLE_ACCOUNTANT): ?>
                                                 <div class="btn-group" role="group">
                                                     <button type="button" class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
                                                         <i class="fas fa-cog"></i>
                                                     </button>
                                                     <ul class="dropdown-menu">
-                                                        <li><a class="dropdown-item" href="#" onclick="updateStatus(<?php echo $payment['bill_id']; ?>, 'Paid')">Mark as Paid</a></li>
-                                                        <li><a class="dropdown-item" href="#" onclick="updateStatus(<?php echo $payment['bill_id']; ?>, 'Declined')">Mark as Declined</a></li>
-                                                        <li><a class="dropdown-item" href="#" onclick="updateStatus(<?php echo $payment['bill_id']; ?>, 'Pending')">Mark as Pending</a></li>
+                                                        <li><a class="dropdown-item" href="#" onclick="updateStatus(<?php echo $payment['bill_id']; ?>, '<?php echo PAYMENT_PAID; ?>')">Mark as Paid</a></li>
+                                                        <li><a class="dropdown-item" href="#" onclick="updateStatus(<?php echo $payment['bill_id']; ?>, '<?php echo PAYMENT_DECLINED; ?>')">Mark as Declined</a></li>
+                                                        <li><a class="dropdown-item" href="#" onclick="updateStatus(<?php echo $payment['bill_id']; ?>, '<?php echo PAYMENT_PENDING; ?>')">Mark as Pending</a></li>
                                                         <li><a class="dropdown-item text-danger" href="#" onclick="confirmDelete(<?php echo $payment['bill_id']; ?>)">Delete</a></li>
                                                     </ul>
                                                 </div>
@@ -388,7 +393,6 @@ include '../layouts/header.php';
                     </table>
                 </div>
                 
-                <!-- Pagination -->
                 <?php if ($result['totalPages'] > 1): ?>
                     <nav aria-label="Payments pagination">
                         <ul class="pagination justify-content-center">
@@ -428,7 +432,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($action === 'add'): ?>
-    <!-- Add Payment Form -->
     <div class="card">
         <div class="card-header">
             <h5 class="card-title mb-0">
@@ -445,6 +448,7 @@ include '../layouts/header.php';
                             <select class="form-select" id="patient_id" name="patient_id" required>
                                 <option value="">Select Patient</option>
                                 <?php
+                                // Fetch patient list
                                 try {
                                     $stmt = $pdo->prepare("SELECT patient_id, name FROM patient ORDER BY name");
                                     $stmt->execute();
@@ -479,9 +483,9 @@ include '../layouts/header.php';
                             <label for="payment_method" class="form-label">Payment Method *</label>
                             <select class="form-select" id="payment_method" name="payment_method" required>
                                 <option value="">Select Payment Method</option>
-                                <option value="Cash" <?php echo ($result['data']['payment_method'] ?? '') === 'Cash' ? 'selected' : ''; ?>>Cash</option>
-                                <option value="Card" <?php echo ($result['data']['payment_method'] ?? '') === 'Card' ? 'selected' : ''; ?>>Card</option>
-                                <option value="Insurance" <?php echo ($result['data']['payment_method'] ?? '') === 'Insurance' ? 'selected' : ''; ?>>Insurance</option>
+                                <option value="<?php echo PAYMENT_CASH; ?>" <?php echo ($result['data']['payment_method'] ?? '') === PAYMENT_CASH ? 'selected' : ''; ?>>Cash</option>
+                                <option value="<?php echo PAYMENT_CARD; ?>" <?php echo ($result['data']['payment_method'] ?? '') === PAYMENT_CARD ? 'selected' : ''; ?>>Card</option>
+                                <option value="<?php echo PAYMENT_INSURANCE; ?>" <?php echo ($result['data']['payment_method'] ?? '') === PAYMENT_INSURANCE ? 'selected' : ''; ?>>Insurance</option>
                             </select>
                             <div class="invalid-feedback">
                                 Please select a payment method.
@@ -492,9 +496,9 @@ include '../layouts/header.php';
                         <div class="mb-3">
                             <label for="payment_status" class="form-label">Payment Status</label>
                             <select class="form-select" id="payment_status" name="payment_status">
-                                <option value="Pending" <?php echo ($result['data']['payment_status'] ?? 'Pending') === 'Pending' ? 'selected' : ''; ?>>Pending</option>
-                                <option value="Paid" <?php echo ($result['data']['payment_status'] ?? '') === 'Paid' ? 'selected' : ''; ?>>Paid</option>
-                                <option value="Declined" <?php echo ($result['data']['payment_status'] ?? '') === 'Declined' ? 'selected' : ''; ?>>Declined</option>
+                                <option value="<?php echo PAYMENT_PENDING; ?>" <?php echo ($result['data']['payment_status'] ?? PAYMENT_PENDING) === PAYMENT_PENDING ? 'selected' : ''; ?>>Pending</option>
+                                <option value="<?php echo PAYMENT_PAID; ?>" <?php echo ($result['data']['payment_status'] ?? '') === PAYMENT_PAID ? 'selected' : ''; ?>>Paid</option>
+                                <option value="<?php echo PAYMENT_DECLINED; ?>" <?php echo ($result['data']['payment_status'] ?? '') === PAYMENT_DECLINED ? 'selected' : ''; ?>>Declined</option>
                             </select>
                         </div>
                     </div>
@@ -505,7 +509,7 @@ include '../layouts/header.php';
                         <div class="mb-3">
                             <label for="payment_date" class="form-label">Payment Date</label>
                             <input type="datetime-local" class="form-control" id="payment_date" name="payment_date" 
-                                   value="<?php echo $result['data']['payment_date'] ?? date('Y-m-d\TH:i'); ?>">
+                                       value="<?php echo $result['data']['payment_date'] ?? date('Y-m-d\TH:i'); ?>">
                         </div>
                     </div>
                 </div>
@@ -534,7 +538,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($action === 'view' && isset($result['payment'])): ?>
-    <!-- Payment View -->
     <div class="row">
         <div class="col-md-6">
             <div class="card">
@@ -553,9 +556,9 @@ include '../layouts/header.php';
                     <p><strong>Status:</strong> 
                         <?php
                         $statusClass = match($result['payment']['payment_status']) {
-                            'Pending' => 'bg-warning',
-                            'Paid' => 'bg-success',
-                            'Declined' => 'bg-danger',
+                            PAYMENT_PENDING => 'bg-warning',
+                            PAYMENT_PAID => 'bg-success',
+                            PAYMENT_DECLINED => 'bg-danger',
                             default => 'bg-secondary'
                         };
                         ?>
@@ -576,7 +579,6 @@ include '../layouts/header.php';
     </div>
 <?php endif; ?>
 
-<!-- Status Update Form -->
 <form id="statusForm" method="POST" style="display: none;">
     <input type="hidden" name="status" id="statusInput">
 </form>

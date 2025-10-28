@@ -2,6 +2,7 @@
 /**
  * Patient Model
  * Hospital Management System
+ * * FIX: Updated joins to use 'users' table instead of 'doctor' table.
  */
 
 class Patient {
@@ -175,10 +176,11 @@ class Patient {
      */
     public function getTreatments($patientId) {
         try {
+            // FIX: Changed JOIN from 'doctor' (d) to 'users' (u)
             $stmt = $this->pdo->prepare("
-                SELECT t.*, d.name as doctor_name 
+                SELECT t.*, u.name as doctor_name 
                 FROM treatment t
-                JOIN doctor d ON t.doctor_id = d.doctor_id
+                JOIN users u ON t.doctor_id = u.user_id 
                 WHERE t.patient_id = ? 
                 ORDER BY t.treatment_date DESC
             ");
@@ -195,10 +197,11 @@ class Patient {
      */
     public function getAppointments($patientId) {
         try {
+            // FIX: Changed JOIN from 'doctor' (d) to 'users' (u)
             $stmt = $this->pdo->prepare("
-                SELECT a.*, d.name as doctor_name 
+                SELECT a.*, u.name as doctor_name 
                 FROM appointment a
-                JOIN doctor d ON a.doctor_id = d.doctor_id
+                JOIN users u ON a.doctor_id = u.user_id 
                 WHERE a.patient_id = ? 
                 ORDER BY a.appointment_date DESC
             ");

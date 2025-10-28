@@ -4,23 +4,43 @@
  * Hospital Management System
  */
 
+// Include necessary files
 require_once '../../../config/config.php';
 require_once '../../../src/helpers/Auth.php';
-require_once '../../../src/controllers/AppointmentController.php';
+// NOTE: Assuming database connection ($pdo) is established in config/config.php or is globally available.
+// If $pdo is not globally available, you must include the file where it is defined, e.g., database.php.
 
 // Initialize authentication
+// Ensure ROLE_DOCTOR is defined in config/config.php (e.g., const ROLE_DOCTOR = 'doctor';)
 $auth = new Auth($pdo);
 $auth->requireRole(ROLE_DOCTOR);
 
 $currentUser = $auth->getCurrentUser();
 
-// Get doctor ID
-$stmt = $pdo->prepare("SELECT doctor_id FROM users WHERE user_id = ?");
-$stmt->execute([$currentUser['user_id']]);
-$user = $stmt->fetch();
-$doctorId = $user['doctor_id'] ?? null;
+// ==============================================================================
+// 1. FIX: GET DOCTOR ID (Use the current user's ID from the 'users' table)
+// ==============================================================================
+// Based on the schema, the doctor's identifier in the appointment table is the user_id.
+// We directly use the logged-in user's ID as the doctor ID.
+$doctorId = $currentUser['user_id'] ?? null;
+
+// Ensure the user is logged in (this is a redundant check if requireRole works, but good for clarity)
+if (!$doctorId) {
+    // Handle error: User is logged in as a doctor but no corresponding user_id found.
+    error_log("Critical Error: Doctor user_id not found in session for user: " . ($currentUser['username'] ?? 'Unknown'));
+    http_response_code(403);
+    include '../layouts/header.php';
+    echo '<div class="alert alert-danger">Critical Error: User profile is incomplete or invalid. Cannot proceed.</div>';
+    include '../layouts/footer.php';
+    exit();
+}
+// ==============================================================================
+
+// NOTE ON MVC: The following logic (lines 37-124) is Controller logic and should ideally be moved
+// into src/controllers/AppointmentController.php for better Separation of Concerns.
 
 // Initialize controller
+require_once '../../../src/controllers/AppointmentController.php'; // Ensure it's required before initialization
 $appointmentController = new AppointmentController($pdo, $auth);
 
 $action = $_GET['action'] ?? 'list';
@@ -30,14 +50,16 @@ $id = $_GET['id'] ?? null;
 switch ($action) {
     case 'view':
         if ($id) {
-            $result = $appointmentController->view($id);
+            // Must enforce scope: Doctor can only view their own appointments
+            $result = $appointmentController->view($id, $doctorId); 
         } else {
             $result = ['error' => 'Appointment ID required'];
         }
         break;
         
     case 'add':
-        $result = $appointmentController->create();
+        // Pass doctorId for automatic assignment
+        $result = $appointmentController->create($doctorId);
         if (isset($result['success'])) {
             header('Location: appointments.php?success=' . urlencode($result['success']));
             exit();
@@ -46,7 +68,8 @@ switch ($action) {
         
     case 'edit':
         if ($id) {
-            $result = $appointmentController->update($id);
+            // Pass doctorId for scope enforcement during update
+            $result = $appointmentController->update($id, $doctorId);
             if (isset($result['success'])) {
                 header('Location: appointments.php?success=' . urlencode($result['success']));
                 exit();
@@ -58,7 +81,8 @@ switch ($action) {
         
     case 'delete':
         if ($id) {
-            $result = $appointmentController->delete($id);
+            // Pass doctorId for scope enforcement during deletion
+            $result = $appointmentController->delete($id, $doctorId);
             if (isset($result['success'])) {
                 header('Location: appointments.php?success=' . urlencode($result['success']));
                 exit();
@@ -70,7 +94,8 @@ switch ($action) {
         
     case 'update_status':
         if ($id && isset($_GET['status'])) {
-            $result = $appointmentController->updateStatus($id, $_GET['status']);
+            // Pass doctorId for scope enforcement
+            $result = $appointmentController->updateStatus($id, $_GET['status'], $doctorId);
             if (isset($result['success'])) {
                 header('Location: appointments.php?success=' . urlencode($result['success']));
                 exit();
@@ -81,37 +106,38 @@ switch ($action) {
         break;
         
     default:
-        $result = $appointmentController->index();
+        // FILTER INDEX BY LOGGED-IN DOCTOR ID
+        // Assuming AppointmentController::index accepts doctorId as a filter
+        $search = $_GET['search'] ?? '';
+        $status = $_GET['status'] ?? '';
+        $page = max(1, intval($_GET['page'] ?? 1));
+
+        $result = $appointmentController->index($search, $status, $page, $doctorId); 
         break;
 }
 
-// Get doctors list for dropdown
-$doctors = [];
+// 2. Fetch patients list for dropdown (Data fetching is acceptable here, but Model is better)
 $patients = [];
 try {
-    $stmt = $pdo->prepare("SELECT doctor_id, name, specialization FROM doctor ORDER BY name");
-    $stmt->execute();
-    $doctors = $stmt->fetchAll();
-    
     $stmt = $pdo->prepare("SELECT patient_id, name FROM patient ORDER BY name");
     $stmt->execute();
     $patients = $stmt->fetchAll();
 } catch (PDOException $e) {
-    error_log("Error fetching doctors/patients: " . $e->getMessage());
+    error_log("Error fetching patients: " . $e->getMessage());
 }
 
 // Handle success/error messages
 $success = $_GET['success'] ?? '';
 $error = $result['error'] ?? '';
 
-$pageTitle = 'Appointment Management';
+$pageTitle = 'My Appointments';
 include '../layouts/header.php';
 ?>
 
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
     <h1 class="h2">
         <i class="fas fa-calendar-alt"></i>
-        Appointment Management
+        My Appointments
     </h1>
     <div class="btn-toolbar mb-2 mb-md-0">
         <div class="btn-group me-2">
@@ -140,7 +166,6 @@ include '../layouts/header.php';
 <?php endif; ?>
 
 <?php if ($action === 'list'): ?>
-    <!-- Appointment List View -->
     <div class="card mb-4">
         <div class="card-body">
             <form method="GET" class="row g-3">
@@ -150,7 +175,7 @@ include '../layouts/header.php';
                             <i class="fas fa-search"></i>
                         </span>
                         <input type="text" class="form-control" name="search" 
-                               placeholder="Search by patient or doctor..." 
+                               placeholder="Search by patient..." 
                                value="<?php echo htmlspecialchars($result['search']); ?>">
                     </div>
                 </div>
@@ -191,7 +216,7 @@ include '../layouts/header.php';
                         <?php if ($result['search'] || $result['status']): ?>
                             No appointments match your search criteria.
                         <?php else: ?>
-                            No appointments have been scheduled yet.
+                            No appointments have been scheduled with you yet.
                         <?php endif; ?>
                     </p>
                     <?php if (!$result['search'] && !$result['status']): ?>
@@ -257,12 +282,12 @@ include '../layouts/header.php';
                                                 <a href="?action=update_status&id=<?php echo $appointment['appointment_id']; ?>&status=Completed" 
                                                    class="btn btn-outline-success" title="Mark as Completed"
                                                    onclick="return confirm('Mark this appointment as completed?')">
-                                                    <i class="fas fa-check"></i>
+                                                     <i class="fas fa-check"></i>
                                                 </a>
                                                 <a href="?action=update_status&id=<?php echo $appointment['appointment_id']; ?>&status=Cancelled" 
                                                    class="btn btn-outline-danger" title="Cancel"
                                                    onclick="return confirm('Cancel this appointment?')">
-                                                    <i class="fas fa-times"></i>
+                                                     <i class="fas fa-times"></i>
                                                 </a>
                                             <?php endif; ?>
                                             <a href="?action=delete&id=<?php echo $appointment['appointment_id']; ?>" 
@@ -278,7 +303,6 @@ include '../layouts/header.php';
                     </table>
                 </div>
                 
-                <!-- Pagination -->
                 <?php if ($result['totalPages'] > 1): ?>
                     <nav aria-label="Appointments pagination">
                         <ul class="pagination justify-content-center">
@@ -318,7 +342,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($action === 'add' || $action === 'edit'): ?>
-    <!-- Add/Edit Appointment Form -->
     <div class="card">
         <div class="card-header">
             <h5 class="card-title mb-0">
@@ -346,22 +369,12 @@ include '../layouts/header.php';
                             </div>
                         </div>
                     </div>
+                    
                     <div class="col-md-6">
-                        <div class="mb-3">
-                            <label for="doctor_id" class="form-label">Doctor *</label>
-                            <select class="form-select" id="doctor_id" name="doctor_id" required>
-                                <option value="">Select Doctor</option>
-                                <?php foreach ($doctors as $doctor): ?>
-                                    <option value="<?php echo $doctor['doctor_id']; ?>" 
-                                            <?php echo ($result['data']['doctor_id'] ?? $result['appointment']['doctor_id'] ?? '') == $doctor['doctor_id'] ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($doctor['name'] . ' - ' . $doctor['specialization']); ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                            <div class="invalid-feedback">
-                                Please select a doctor.
-                            </div>
-                        </div>
+                           <div class="mb-3">
+                            <label for="doctor_name" class="form-label">Doctor (Yourself)</label>
+                            <input type="text" class="form-control" value="<?php echo htmlspecialchars($currentUser['username'] ?? 'Loading...'); ?>" disabled>
+                            <input type="hidden" name="user_id" value="<?php echo $doctorId; ?>"> </div>
                     </div>
                 </div>
                 
@@ -370,7 +383,7 @@ include '../layouts/header.php';
                         <div class="mb-3">
                             <label for="appointment_date" class="form-label">Date & Time *</label>
                             <input type="datetime-local" class="form-control" id="appointment_date" name="appointment_date" 
-                                   value="<?php echo $result['data']['appointment_date'] ?? $result['appointment']['appointment_date'] ?? ''; ?>" required>
+                                    value="<?php echo $result['data']['appointment_date'] ?? str_replace(' ', 'T', $result['appointment']['appointment_date'] ?? ''); ?>" required>
                             <div class="invalid-feedback">
                                 Please provide a valid date and time.
                             </div>
@@ -397,7 +410,7 @@ include '../layouts/header.php';
                         <div class="mb-3">
                             <label for="appointment_status" class="form-label">Status *</label>
                             <select class="form-select" id="appointment_status" name="appointment_status" required>
-                                <option value="Scheduled" <?php echo ($result['data']['appointment_status'] ?? $result['appointment']['appointment_status'] ?? '') === 'Scheduled' ? 'selected' : ''; ?>>Scheduled</option>
+                                <option value="Scheduled" <?php echo ($result['data']['appointment_status'] ?? $result['appointment']['appointment_status'] ?? 'Scheduled') === 'Scheduled' ? 'selected' : ''; ?>>Scheduled</option>
                                 <option value="Completed" <?php echo ($result['data']['appointment_status'] ?? $result['appointment']['appointment_status'] ?? '') === 'Completed' ? 'selected' : ''; ?>>Completed</option>
                                 <option value="Cancelled" <?php echo ($result['data']['appointment_status'] ?? $result['appointment']['appointment_status'] ?? '') === 'Cancelled' ? 'selected' : ''; ?>>Cancelled</option>
                                 <option value="No show" <?php echo ($result['data']['appointment_status'] ?? $result['appointment']['appointment_status'] ?? '') === 'No show' ? 'selected' : ''; ?>>No Show</option>
@@ -433,7 +446,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($action === 'view' && isset($result['appointment'])): ?>
-    <!-- Appointment View -->
     <div class="row">
         <div class="col-md-8">
             <div class="card">

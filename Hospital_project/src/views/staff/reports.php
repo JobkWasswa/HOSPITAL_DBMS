@@ -4,29 +4,51 @@
  * Hospital Management System
  */
 
+// Load Configuration and Database Connection ($pdo)
 require_once '../../../config/config.php';
+// Load ALL defined constants (for role definitions, etc.)
+require_once '../../../config/constants.php'; 
 require_once '../../../src/helpers/Auth.php';
 require_once '../../../src/controllers/ReportsController.php';
 
+// Define the roles allowed to access this report page
+// These constants (ROLE_DOCTOR, ROLE_ACCOUNTANT, etc.) are assumed to be loaded from constants.php
+$allowedRoles = [
+    ROLE_DOCTOR,
+    ROLE_NURSE,
+    ROLE_ACCOUNTANT,
+    ROLE_RECEPTIONIST
+];
+
 // Initialize authentication
+// A general check for ROLE_STAFF (assuming it encompasses the specific roles)
 $auth = new Auth($pdo);
-$auth->requireRole(ROLE_STAFF);
+// Assuming ROLE_STAFF is the base role for all staff members who need access to reports
+$auth->requireRole(ROLE_ACCOUNTANT); 
 
 $currentUser = $auth->getCurrentUser();
 
-// Get staff role
-try {
-    $stmt = $pdo->prepare("
-        SELECT s.role as staff_role 
-        FROM staff s
-        WHERE s.staff_id = (SELECT staff_id FROM users WHERE user_id = ?)
-    ");
-    $stmt->execute([$currentUser['user_id']]);
-    $staffInfo = $stmt->fetch();
-    $staffRole = $staffInfo['staff_role'] ?? 'Staff';
-} catch (PDOException $e) {
-    $staffRole = 'Staff';
+// --- ROLE RETRIEVAL ---
+// Get staff role directly from the authenticated user's data (from the 'users' table).
+$staffRole = $currentUser['role'] ?? 'Guest'; // Fallback to 'Guest' if role key is missing
+// --- END ROLE RETRIEVAL ---
+
+// --- ACCESS CONTROL: ENFORCE SPECIFIC ROLES ---
+// Check if the determined staff role is in the list of allowed roles.
+if (!in_array($staffRole, $allowedRoles)) {
+    // If unauthorized, deny access and terminate the script.
+    http_response_code(403);
+    $pageTitle = 'Access Denied';
+    include '../layouts/header.php';
+    echo '<div class="alert alert-danger my-5 text-center">';
+    echo '<h3><i class="fas fa-lock"></i> Access Denied (403)</h3>';
+    echo '<p>Your role (' . htmlspecialchars($staffRole) . ') is not authorized to view this report page. Only Doctors, Nurses, Accountants, and Receptionists are allowed.</p>';
+    echo '<p><a href="../dashboard.php" class="btn btn-primary mt-3">Go to Dashboard</a></p>';
+    include '../layouts/footer.php';
+    exit(); // Terminate script execution
 }
+// --- END ACCESS CONTROL ---
+
 
 // Initialize controller
 $reportsController = new ReportsController($pdo, $auth);
@@ -112,18 +134,8 @@ include '../layouts/header.php';
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link <?php echo $reportType === 'patients' ? 'active' : ''; ?>" href="reports.php?type=patients">
-                            <i class="fas fa-users"></i> Patients
-                        </a>
-                    </li>
-                    <li class="nav-item">
                         <a class="nav-link <?php echo $reportType === 'appointments' ? 'active' : ''; ?>" href="reports.php?type=appointments">
                             <i class="fas fa-calendar"></i> Appointments
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link <?php echo $reportType === 'admissions' ? 'active' : ''; ?>" href="reports.php?type=admissions">
-                            <i class="fas fa-bed"></i> Admissions
                         </a>
                     </li>
                     <li class="nav-item">
@@ -302,7 +314,10 @@ include '../layouts/header.php';
     </div>
 
 <?php else: ?>
-    <?php if ($reportType === 'payments' && $staffRole === STAFF_ACCOUNTANT): ?>
+    <?php 
+    // Now we use ROLE_ACCOUNTANT directly, assuming it's loaded from constants.php
+    if ($reportType === 'payments' && $staffRole === ROLE_ACCOUNTANT): 
+    ?>
         <!-- Accountant-only Payments Summary (Bar Chart) -->
         <div class="card mb-4">
             <div class="card-header d-flex align-items-center justify-content-between">

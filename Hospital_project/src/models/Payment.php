@@ -2,6 +2,10 @@
 /**
  * Payment Model
  * Hospital Management System
+ * * FIXES APPLIED:
+ * 1. Removed all SQL logic and calculation for the 'prescription' table 
+ * (as the table is now deleted).
+ * 2. Simplified Admissions bill calculation by removing the obsolete 'bed' joins.
  */
 
 class Payment {
@@ -253,12 +257,15 @@ class Payment {
         }
     }
     
+    //-------------------------------------------------------------------------
+    
     /**
-     * Calculate patient total bill (mirrors provided SQL logic exactly)
+     * Calculate patient total bill.
+     * NOTE: Logic for 'prescription' has been removed as the table is obsolete.
      */
     public function calculatePatientBill($patientId) {
         try {
-            // Treatments
+            // 1. Treatments
             $stmt = $this->pdo->prepare("
                 SELECT COALESCE(SUM(treatment_fee), 0) AS total
                 FROM treatment
@@ -267,7 +274,7 @@ class Payment {
             $stmt->execute([$patientId]);
             $treatmentsTotal = (float)($stmt->fetch()['total'] ?? 0);
             
-            // Lab tests
+            // 2. Lab tests
             $stmt = $this->pdo->prepare("
                 SELECT COALESCE(SUM(test_cost), 0) AS total
                 FROM lab_test
@@ -276,7 +283,13 @@ class Payment {
             $stmt->execute([$patientId]);
             $labTotal = (float)($stmt->fetch()['total'] ?? 0);
             
-            // Prescriptions (via treatments)
+            // 3. Prescriptions (REMOVED - Assumed no new structure for this cost yet)
+            // If medicine costs are now tracked elsewhere (e.g., in a JSON field 
+            // on 'treatment'), you must update this logic. For now, it is 0.
+            $prescriptionsTotal = 0.0; 
+            
+            /*
+            // OLD, REMOVED PRESCRIPTION LOGIC:
             $stmt = $this->pdo->prepare("
                 SELECT COALESCE(SUM(p.quantity * m.medicine_price), 0) AS total
                 FROM prescription p
@@ -286,27 +299,22 @@ class Payment {
             ");
             $stmt->execute([$patientId]);
             $prescriptionsTotal = (float)($stmt->fetch()['total'] ?? 0);
+            */
             
-            // Admissions: prefer direct room_id, fallback via bed -> room
+            // 4. Admissions: Fixed for new schema (removed 'bed' table dependency)
             $stmt = $this->pdo->prepare("
                 SELECT COALESCE(SUM(
-                         (DATEDIFF(COALESCE(a.discharge_date, NOW()), a.admission_date) + 1)
-                         * COALESCE(
-                             CASE 
-                               WHEN a.room_id IS NOT NULL THEN r1.daily_cost 
-                               ELSE r2.daily_cost 
-                             END, 0)
-                       ), 0) AS total
+                             (DATEDIFF(COALESCE(a.discharge_date, NOW()), a.admission_date) + 1)
+                             * r.daily_cost
+                         ), 0) AS total
                 FROM admission a
-                LEFT JOIN room r1 ON a.room_id = r1.room_id
-                LEFT JOIN bed b ON a.bed_id = b.bed_id
-                LEFT JOIN room r2 ON b.room_id = r2.room_id
+                JOIN room r ON a.room_id = r.room_id
                 WHERE a.patient_id = ?
             ");
             $stmt->execute([$patientId]);
             $admissionsTotal = (float)($stmt->fetch()['total'] ?? 0);
             
-            // Appointments (exclude Cancelled/No show; case-insensitive)
+            // 5. Appointments 
             $stmt = $this->pdo->prepare("
                 SELECT COALESCE(SUM(consultation_fee), 0) AS total
                 FROM appointment
@@ -316,13 +324,17 @@ class Payment {
             $stmt->execute([$patientId]);
             $appointmentsTotal = (float)($stmt->fetch()['total'] ?? 0);
             
+            // Final Total Calculation
             $total = $treatmentsTotal + $labTotal + $prescriptionsTotal + $admissionsTotal + $appointmentsTotal;
             return $total;
+            
         } catch (PDOException $e) {
             error_log("Payment calculatePatientBill error: " . $e->getMessage());
             return 0.0;
         }
     }
+    
+    //-------------------------------------------------------------------------
     
     /**
      * Validate payment data

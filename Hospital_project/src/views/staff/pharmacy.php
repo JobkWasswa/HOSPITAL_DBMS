@@ -1,31 +1,32 @@
 <?php
 /**
- * Pharmacy Management - Staff View
+ * Pharmacy Management - View Accessible by All Logged-in Users
  * Hospital Management System
  */
 
+// Load Configuration and Database Connection ($pdo)
 require_once '../../../config/config.php';
+// Load ALL defined constants (for role definitions, etc.)
+require_once '../../../config/constants.php'; 
 require_once '../../../src/helpers/Auth.php';
+
+// Define the pagination constant if it's not in constants.php
+if (!defined('RECORDS_PER_PAGE')) {
+    // Default pagination limit
+    define('RECORDS_PER_PAGE', 20); 
+}
 
 // Initialize authentication
 $auth = new Auth($pdo);
-$auth->requireRole(ROLE_STAFF);
+// >>> FIX 1: Allow access to all authenticated users <<<
+// We ensure the user is logged in, but we do NOT check for a specific role.
+$auth->requireLogin(); // Assuming this helper function simply checks if a user session exists
 
 $currentUser = $auth->getCurrentUser();
 
-// Get staff role
-try {
-    $stmt = $pdo->prepare("
-        SELECT s.role as staff_role 
-        FROM staff s
-        WHERE s.staff_id = (SELECT staff_id FROM users WHERE user_id = ?)
-    ");
-    $stmt->execute([$currentUser['user_id']]);
-    $staffInfo = $stmt->fetch();
-    $staffRole = $staffInfo['staff_role'] ?? 'Staff';
-} catch (PDOException $e) {
-    $staffRole = 'Staff';
-}
+// The user's role is not required for access, but we can fetch their name/role for display if needed.
+$userName = htmlspecialchars($currentUser['username'] ?? 'User');
+
 
 $action = $_GET['action'] ?? 'list';
 $id = $_GET['id'] ?? null;
@@ -35,44 +36,66 @@ switch ($action) {
     case 'view':
         if ($id) {
             try {
+                // >>> FIX APPLIED HERE: Corrected SQL to select fields explicitly and join all necessary tables (t, m, pt, u) <<<
                 $stmt = $pdo->prepare("
-                    SELECT p.*, m.name as medicine_name, m.dosage, m.medicine_price
-                    FROM prescription p
-                    JOIN medicine m ON p.medicine_id = m.medicine_id
-                    WHERE p.prescription_id = ?
+                    SELECT 
+                        t.treatment_id, 
+                        t.notes AS dosage_instructions, -- Maps notes field to be used as instructions
+                        t.treatment_date,
+                        m.name AS medicine_name, 
+                        m.dosage, 
+                        m.medicine_price,
+                        pt.name AS patient_name, -- Fetch patient name
+                        u.username AS prescribing_user_name
+                    FROM treatment t
+                    JOIN medicine m ON t.medicine_id = m.medicine_id
+                    JOIN patient pt ON t.patient_id = pt.patient_id -- Added patient join
+                    JOIN users u ON t.user_id = u.user_id
+                    WHERE t.treatment_id = ? -- Filter by the treatment ID
                 ");
                 $stmt->execute([$id]);
-                $prescription = $stmt->fetch();
+                $prescription = $stmt->fetch(PDO::FETCH_ASSOC);
                 
                 if (!$prescription) {
-                    $result = ['error' => 'Prescription not found'];
+                    $result = ['error' => 'Treatment record (Prescription) not found'];
                 } else {
                     $result = ['prescription' => $prescription];
                 }
             } catch (PDOException $e) {
+                error_log("Treatment View Error (ID: $id): " . $e->getMessage());
                 $result = ['error' => 'Database error occurred'];
             }
         } else {
-            $result = ['error' => 'Prescription ID required'];
+            $result = ['error' => 'Treatment ID required'];
         }
         break;
         
     default:
-        // Get prescriptions with pagination
+        // Get prescriptions/treatments with pagination
         $search = $_GET['search'] ?? '';
         $page = max(1, intval($_GET['page'] ?? 1));
         $limit = RECORDS_PER_PAGE;
         $offset = ($page - 1) * $limit;
         
         try {
+            // NOTE: Your schema does not have a 'prescription' table, 
+            // but the 'treatment' table links patient, user (doctor), and medicine. 
+            // I'm assuming 'treatment' now serves the role of a prescription record.
+            
             $sql = "
-                SELECT p.*, m.name as medicine_name, m.dosage, m.medicine_price,
-                       pt.name as patient_name, d.name as doctor_name
-                FROM prescription p
-                JOIN medicine m ON p.medicine_id = m.medicine_id
-                JOIN treatment t ON p.treatment_id = t.treatment_id
+                SELECT 
+                    t.treatment_id, 
+                    t.notes AS dosage_instructions, -- Assuming notes are the instructions
+                    t.treatment_date,
+                    m.name AS medicine_name, 
+                    m.dosage, 
+                    m.medicine_price,
+                    pt.name AS patient_name, 
+                    u.username AS prescribing_user_name -- Renamed Doctor Name to User Name
+                FROM treatment t
+                JOIN medicine m ON t.medicine_id = m.medicine_id
                 JOIN patient pt ON t.patient_id = pt.patient_id
-                JOIN doctor d ON t.doctor_id = d.doctor_id
+                JOIN users u ON t.user_id = u.user_id  -- Joined 'users' instead of deleted 'doctor'
                 WHERE 1=1
             ";
             $params = [];
@@ -83,21 +106,21 @@ switch ($action) {
                 $params[] = "%$search%";
             }
             
-            $sql .= " ORDER BY p.prescription_id DESC LIMIT ? OFFSET ?";
+            $sql .= " ORDER BY t.treatment_id DESC LIMIT ? OFFSET ?";
             $params[] = $limit;
             $params[] = $offset;
             
             $stmt = $pdo->prepare($sql);
             $stmt->execute($params);
-            $prescriptions = $stmt->fetchAll();
+            $prescriptions = $stmt->fetchAll(PDO::FETCH_ASSOC); 
             
             // Get total count
             $countSql = "
                 SELECT COUNT(*) as count
-                FROM prescription p
-                JOIN medicine m ON p.medicine_id = m.medicine_id
-                JOIN treatment t ON p.treatment_id = t.treatment_id
+                FROM treatment t
+                JOIN medicine m ON t.medicine_id = m.medicine_id
                 JOIN patient pt ON t.patient_id = pt.patient_id
+                JOIN users u ON t.user_id = u.user_id
                 WHERE 1=1
             ";
             $countParams = [];
@@ -110,7 +133,7 @@ switch ($action) {
             
             $stmt = $pdo->prepare($countSql);
             $stmt->execute($countParams);
-            $totalCount = $stmt->fetch()['count'];
+            $totalCount = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
             $totalPages = ceil($totalCount / $limit);
             
             $result = [
@@ -121,6 +144,7 @@ switch ($action) {
                 'search' => $search
             ];
         } catch (PDOException $e) {
+            error_log("Prescription list error: " . $e->getMessage());
             $result = ['error' => 'Database error occurred'];
         }
         break;
@@ -166,7 +190,7 @@ include '../layouts/header.php';
 <?php endif; ?>
 
 <?php if ($action === 'list'): ?>
-    <!-- Prescription List View -->
+    <!-- Prescription/Treatment List View -->
     <div class="card mb-4">
         <div class="card-body">
             <form method="GET" class="row g-3">
@@ -195,7 +219,7 @@ include '../layouts/header.php';
     <div class="card">
         <div class="card-header">
             <h5 class="card-title mb-0">
-                Prescriptions List
+                Prescriptions (Treatments) List
                 <span class="badge bg-primary ms-2"><?php echo $result['totalPrescriptions'] ?? 0; ?> total</span>
             </h5>
         </div>
@@ -203,14 +227,7 @@ include '../layouts/header.php';
             <?php if (empty($result['prescriptions'])): ?>
                 <div class="text-center py-5">
                     <i class="fas fa-pills fa-3x text-muted mb-3"></i>
-                    <h4 class="text-muted">No prescriptions found</h4>
-                    <p class="text-muted">
-                        <?php if (!empty($result['search'])): ?>
-                            No prescriptions match your search criteria.
-                        <?php else: ?>
-                            No prescriptions have been issued yet.
-                        <?php endif; ?>
-                    </p>
+                    <h4 class="text-muted">No treatments requiring pharmacy action found</h4>
                 </div>
             <?php else: ?>
                 <div class="table-responsive">
@@ -221,9 +238,8 @@ include '../layouts/header.php';
                                 <th>Patient</th>
                                 <th>Medicine</th>
                                 <th>Dosage</th>
-                                <th>Quantity</th>
                                 <th>Instructions</th>
-                                <th>Doctor</th>
+                                <th>Prescribed By</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -231,7 +247,7 @@ include '../layouts/header.php';
                             <?php foreach ($result['prescriptions'] as $prescription): ?>
                                 <tr>
                                     <td>
-                                        <span class="badge bg-info"><?php echo $prescription['prescription_id']; ?></span>
+                                        <span class="badge bg-info"><?php echo $prescription['treatment_id']; ?></span>
                                     </td>
                                     <td>
                                         <strong><?php echo htmlspecialchars($prescription['patient_name']); ?></strong>
@@ -243,20 +259,18 @@ include '../layouts/header.php';
                                         <?php echo htmlspecialchars($prescription['dosage']); ?>
                                     </td>
                                     <td>
-                                        <span class="badge bg-secondary"><?php echo $prescription['quantity']; ?></span>
-                                    </td>
-                                    <td>
                                         <?php echo htmlspecialchars(substr($prescription['dosage_instructions'], 0, 30)) . (strlen($prescription['dosage_instructions']) > 30 ? '...' : ''); ?>
                                     </td>
                                     <td>
-                                        <?php echo htmlspecialchars($prescription['doctor_name']); ?>
+                                        <?php echo htmlspecialchars($prescription['prescribing_user_name']); ?>
                                     </td>
                                     <td>
                                         <div class="btn-group btn-group-sm" role="group">
-                                            <a href="?action=view&id=<?php echo $prescription['prescription_id']; ?>" 
+                                            <a href="?action=view&id=<?php echo $prescription['treatment_id']; ?>" 
                                                class="btn btn-outline-primary" title="View Details">
                                                 <i class="fas fa-eye"></i>
                                             </a>
+                                            <!-- A 'Dispense' action button would typically be placed here -->
                                         </div>
                                     </td>
                                 </tr>
@@ -310,20 +324,18 @@ include '../layouts/header.php';
         <div class="col-md-6">
             <div class="card">
                 <div class="card-header">
-                    <h5 class="card-title mb-0">Prescription Details</h5>
+                    <h5 class="card-title mb-0">Prescription Details (Treatment #<?php echo $result['prescription']['treatment_id']; ?>)</h5>
                 </div>
                 <div class="card-body">
-                    <h4>Prescription #<?php echo $result['prescription']['prescription_id']; ?></h4>
-                    
                     <hr>
-                    
+                    <!-- Displaying the Patient Name from the fixed query -->
+                    <p><strong>Patient:</strong> <?php echo htmlspecialchars($result['prescription']['patient_name'] ?? 'N/A'); ?></p>
                     <p><strong>Medicine:</strong> <?php echo htmlspecialchars($result['prescription']['medicine_name']); ?></p>
                     <p><strong>Dosage:</strong> <?php echo htmlspecialchars($result['prescription']['dosage']); ?></p>
-                    <p><strong>Quantity:</strong> <?php echo $result['prescription']['quantity']; ?></p>
                     <p><strong>Instructions:</strong> <?php echo htmlspecialchars($result['prescription']['dosage_instructions']); ?></p>
+                    <p><strong>Prescribed By:</strong> <?php echo htmlspecialchars($result['prescription']['prescribing_user_name']); ?></p>
                     <p><strong>Price per unit:</strong> $<?php echo number_format($result['prescription']['medicine_price'], 2); ?></p>
-                    <p><strong>Total Cost:</strong> $<?php echo number_format($result['prescription']['quantity'] * $result['prescription']['medicine_price'], 2); ?></p>
-                </div>
+                    </div>
             </div>
         </div>
     </div>

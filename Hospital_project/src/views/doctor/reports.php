@@ -61,7 +61,6 @@ include '../layouts/header.php';
                     <option value="rooms" <?php echo $reportType === 'rooms' ? 'selected' : ''; ?>>Room Utilization</option>
                     <option value="inventory" <?php echo $reportType === 'inventory' ? 'selected' : ''; ?>>Medicine Inventory</option>
                     <option value="demographics" <?php echo $reportType === 'demographics' ? 'selected' : ''; ?>>Patient Demographics</option>
-                    <option value="trends" <?php echo $reportType === 'trends' ? 'selected' : ''; ?>>Monthly Trends</option>
                     <option value="charts_doctor" <?php echo $reportType === 'charts_doctor' ? 'selected' : ''; ?>>Charts (Line/Pie/Bar)</option>
                 </select>
             </div>
@@ -464,35 +463,6 @@ include '../layouts/header.php';
         </div>
     </div>
 
-<?php elseif ($reportType === 'trends'): ?>
-    <div class="card">
-        <div class="card-header">
-            <h5 class="card-title mb-0">Monthly Trends</h5>
-        </div>
-        <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-hover">
-                    <thead class="table-light">
-                        <tr>
-                            <th>Month</th>
-                            <th>Appointments</th>
-                            <th>Revenue</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach (($result['data'] ?? []) as $trend): ?>
-                            <tr>
-                                <td><?php echo htmlspecialchars($trend['month_name'] ?? 'N/A'); ?></td>
-                                <td><?php echo (int)($trend['appointments'] ?? 0); ?></td>
-                                <td>$<?php echo number_format($trend['revenue'] ?? 0, 2); ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
 <?php elseif ($reportType === 'charts_doctor'): ?>
     <div class="card mb-4">
         <div class="card-header">
@@ -517,7 +487,7 @@ include '../layouts/header.php';
         <div class="col-md-6">
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="card-title mb-0">Top Medicines by Quantity</h5>
+                    <h5 class="card-title mb-0">Top Medicines by Usage</h5>
                 </div>
                 <div class="card-body">
                     <canvas id="topMedicinesBar" height="180"></canvas>
@@ -576,8 +546,13 @@ include '../layouts/header.php';
             options: { responsive: true, maintainAspectRatio: false }
         });
 
-        // Bar: Top Medicines by Quantity
+        // Bar: Top Medicines by Quantity (each bar different color)
         const ctxBar = document.getElementById('topMedicinesBar');
+        const colors = [
+            '#36b9cc', '#f6c23e', '#1cc88a', '#4e73df', '#e74a3b',
+            '#858796', '#5a5c69', '#2e59d9', '#17a673', '#fd7e14'
+        ];
+
         new Chart(ctxBar, {
             type: 'bar',
             data: {
@@ -585,15 +560,24 @@ include '../layouts/header.php';
                 datasets: [{
                     label: 'Quantity',
                     data: medCounts,
-                    backgroundColor: '#36b9cc',
-                    borderColor: '#36b9cc',
+                    backgroundColor: medLabels.map((_, i) => colors[i % colors.length]),
+                    borderColor: medLabels.map((_, i) => colors[i % colors.length]),
                     borderWidth: 1
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                scales: { y: { beginAtZero: true } }
+                scales: { 
+                    y: { 
+                        beginAtZero: true,
+                        ticks: { precision: 0 }
+                    } 
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { enabled: true }
+                }
             }
         });
     })();

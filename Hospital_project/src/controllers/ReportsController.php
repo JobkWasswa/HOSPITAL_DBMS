@@ -71,10 +71,6 @@ class ReportsController {
                 // Demographics list
                 $data = $this->reportsModel->getPatientDemographics(); 
                 break;
-            case 'trends':
-                // Monthly trends data for charts
-                $data = $this->reportsModel->getMonthlyTrends($startDate, $endDate);
-                break;
 
             case 'charts_doctor':
                 // Compose datasets needed for doctor charts
@@ -109,6 +105,32 @@ class ReportsController {
             'data' => $data
         ];
     }
+    public function getAdmissionsList($startDate, $endDate) {
+        try {
+            $sql = "
+                SELECT 
+                    a.admission_id,
+                    a.admission_date,
+                    a.discharge_date,
+                    p.name AS patient_name,
+                    r.room_type,
+                    u.name AS doctor_name
+                FROM admission a
+                JOIN patient p ON a.patient_id = p.patient_id
+                LEFT JOIN room r ON a.room_id = r.room_id
+                LEFT JOIN users u ON a.doctor_id = u.user_id
+                WHERE DATE(a.admission_date) BETWEEN ? AND ?
+                ORDER BY a.admission_date DESC
+            ";
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute([$startDate, $endDate]);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            error_log("Reports getAdmissionsList error: " . $e->getMessage());
+            return [];
+        }
+    }
+
     
     /**
      * Export report to CSV
@@ -151,9 +173,6 @@ class ReportsController {
                 break;
             case 'demographics':
                 $data = $this->reportsModel->getPatientDemographics(); 
-                break;
-            case 'trends':
-                $data = $this->reportsModel->getMonthlyTrends($startDate, $endDate);
                 break;
             default:
                 $data = $this->reportsModel->getAppointmentsList($startDate, $endDate); 

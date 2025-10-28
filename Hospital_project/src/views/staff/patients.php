@@ -8,6 +8,10 @@ require_once '../../../config/config.php';
 require_once '../../../src/helpers/Auth.php';
 require_once '../../../src/controllers/PatientController.php';
 
+// Define the staff role constants if they are not in config/config.php (assuming they were in the original setup)
+if (!defined('ROLE_STAFF')) define('ROLE_STAFF', 'staff'); 
+if (!defined('STAFF_RECEPTIONIST')) define('STAFF_RECEPTIONIST', 'receptionist');
+
 // Initialize authentication
 $auth = new Auth($pdo);
 $auth->requireRole(ROLE_STAFF);
@@ -16,16 +20,18 @@ $currentUser = $auth->getCurrentUser();
 
 // Get staff role
 try {
+    // Assuming staff roles are mapped in a 'staff' table which the 'users' table links to.
     $stmt = $pdo->prepare("
-        SELECT s.role as staff_role 
-        FROM staff s
-        WHERE s.staff_id = (SELECT staff_id FROM users WHERE user_id = ?)
+        SELECT u.role as staff_role 
+        FROM users u
+        WHERE u.user_id = ?
     ");
     $stmt->execute([$currentUser['user_id']]);
     $staffInfo = $stmt->fetch();
     $staffRole = $staffInfo['staff_role'] ?? 'Staff';
 } catch (PDOException $e) {
-    $staffRole = 'Staff';
+    // Fallback if the above query fails (might be simpler if 'role' is directly on 'users')
+    $staffRole = $currentUser['role'] ?? 'Staff';
 }
 
 // Initialize controller
@@ -38,7 +44,8 @@ $id = $_GET['id'] ?? null;
 switch ($action) {
     case 'view':
         if ($id) {
-            $result = $patientController->view($id);
+            // NOTE: PatientController::view() is assumed to return 'patient', 'treatments', and 'appointments'
+            $result = $patientController->view($id); 
         } else {
             $result = ['error' => 'Patient ID required'];
         }
@@ -130,7 +137,6 @@ include '../layouts/header.php';
 <?php endif; ?>
 
 <?php if ($action === 'list'): ?>
-    <!-- Patient List View -->
     <div class="card mb-4">
         <div class="card-body">
             <form method="GET" class="row g-3">
@@ -141,7 +147,7 @@ include '../layouts/header.php';
                         </span>
                         <input type="text" class="form-control" name="search" 
                                placeholder="Search by name or phone..." 
-                               value="<?php echo htmlspecialchars($result['search']); ?>">
+                               value="<?php echo htmlspecialchars($result['search'] ?? ''); ?>">
                     </div>
                 </div>
                 <div class="col-md-4">
@@ -160,7 +166,7 @@ include '../layouts/header.php';
         <div class="card-header">
             <h5 class="card-title mb-0">
                 Patients List
-                <span class="badge bg-primary ms-2"><?php echo $result['totalPatients']; ?> total</span>
+                <span class="badge bg-primary ms-2"><?php echo $result['totalPatients'] ?? 0; ?> total</span>
             </h5>
         </div>
         <div class="card-body">
@@ -169,13 +175,13 @@ include '../layouts/header.php';
                     <i class="fas fa-users fa-3x text-muted mb-3"></i>
                     <h4 class="text-muted">No patients found</h4>
                     <p class="text-muted">
-                        <?php if ($result['search']): ?>
+                        <?php if ($result['search'] ?? false): ?>
                             No patients match your search criteria.
                         <?php else: ?>
                             No patients have been registered yet.
                         <?php endif; ?>
                     </p>
-                    <?php if (!$result['search'] && $staffRole === STAFF_RECEPTIONIST): ?>
+                    <?php if (!($result['search'] ?? false) && $staffRole === STAFF_RECEPTIONIST): ?>
                         <a href="?action=add" class="btn btn-primary">
                             <i class="fas fa-user-plus"></i>
                             Register First Patient
@@ -198,7 +204,8 @@ include '../layouts/header.php';
                         <tbody>
                             <?php foreach ($result['patients'] as $patient): ?>
                                 <?php
-                                $age = date_diff(date_create($patient['DOB']), date_create('today'))->y;
+                                // Ensure DOB exists before calculating age
+                                $age = isset($patient['DOB']) ? date_diff(date_create($patient['DOB']), date_create('today'))->y : 'N/A';
                                 ?>
                                 <tr>
                                     <td>
@@ -243,34 +250,37 @@ include '../layouts/header.php';
                     </table>
                 </div>
                 
-                <!-- Pagination -->
-                <?php if ($result['totalPages'] > 1): ?>
+                <?php if ($result['totalPages'] ?? 0 > 1): ?>
                     <nav aria-label="Patients pagination">
                         <ul class="pagination justify-content-center">
-                            <?php if ($result['currentPage'] > 1): ?>
+                            <?php if ($result['currentPage'] ?? 1 > 1): ?>
                                 <li class="page-item">
-                                    <a class="page-link" href="?search=<?php echo urlencode($result['search']); ?>&page=<?php echo $result['currentPage'] - 1; ?>">
+                                    <a class="page-link" href="?search=<?php echo urlencode($result['search'] ?? ''); ?>&page=<?php echo $result['currentPage'] - 1; ?>">
                                         <i class="fas fa-chevron-left"></i> Previous
                                     </a>
                                 </li>
                             <?php endif; ?>
                             
                             <?php
-                            $startPage = max(1, $result['currentPage'] - 2);
-                            $endPage = min($result['totalPages'], $result['currentPage'] + 2);
+                            $currentPage = $result['currentPage'] ?? 1;
+                            $totalPages = $result['totalPages'] ?? 1;
+                            $search = $result['search'] ?? '';
+
+                            $startPage = max(1, $currentPage - 2);
+                            $endPage = min($totalPages, $currentPage + 2);
                             
                             for ($i = $startPage; $i <= $endPage; $i++):
                             ?>
-                                <li class="page-item <?php echo $i === $result['currentPage'] ? 'active' : ''; ?>">
-                                    <a class="page-link" href="?search=<?php echo urlencode($result['search']); ?>&page=<?php echo $i; ?>">
+                                <li class="page-item <?php echo $i === $currentPage ? 'active' : ''; ?>">
+                                    <a class="page-link" href="?search=<?php echo urlencode($search); ?>&page=<?php echo $i; ?>">
                                         <?php echo $i; ?>
                                     </a>
                                 </li>
                             <?php endfor; ?>
                             
-                            <?php if ($result['currentPage'] < $result['totalPages']): ?>
+                            <?php if ($currentPage < $totalPages): ?>
                                 <li class="page-item">
-                                    <a class="page-link" href="?search=<?php echo urlencode($result['search']); ?>&page=<?php echo $result['currentPage'] + 1; ?>">
+                                    <a class="page-link" href="?search=<?php echo urlencode($search); ?>&page=<?php echo $currentPage + 1; ?>">
                                         Next <i class="fas fa-chevron-right"></i>
                                     </a>
                                 </li>
@@ -283,7 +293,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($action === 'add' && $staffRole === STAFF_RECEPTIONIST): ?>
-    <!-- Add Patient Form (Receptionist Only) -->
     <div class="card">
         <div class="card-header">
             <h5 class="card-title mb-0">
@@ -372,7 +381,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($action === 'edit' && $staffRole === STAFF_RECEPTIONIST && isset($result['patient'])): ?>
-    <!-- Edit Patient Form (Receptionist Only) -->
     <div class="card">
         <div class="card-header">
             <h5 class="card-title mb-0">
@@ -461,12 +469,11 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($action === 'view' && isset($result['patient'])): ?>
-    <!-- Patient View (All Staff) -->
     <div class="row">
         <div class="col-md-4">
-            <div class="card">
+            <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="card-title mb-0">Patient Information</h5>
+                    <h5 class="card-title mb-0">Patient Profile</h5>
                 </div>
                 <div class="card-body">
                     <h4><?php echo htmlspecialchars($result['patient']['name']); ?></h4>
@@ -492,30 +499,39 @@ include '../layouts/header.php';
         </div>
         
         <div class="col-md-8">
-            <!-- Medical History -->
+            
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="card-title mb-0">Medical History</h5>
+                    <h5 class="card-title mb-0">Recent Appointments</h5>
                 </div>
                 <div class="card-body">
-                    <?php if (empty($result['medical_history'])): ?>
-                        <p class="text-muted">No medical history recorded.</p>
+                    <?php if (empty($result['appointments'])): ?>
+                        <p class="text-muted">No appointments recorded.</p>
                     <?php else: ?>
                         <div class="table-responsive">
                             <table class="table table-sm">
                                 <thead>
                                     <tr>
-                                        <th>Medical Condition</th>
-                                        <th>Diagnosis Date</th>
-                                        <th>Notes</th>
+                                        <th>Date/Time</th>
+                                        <th>Doctor</th>
+                                        <th>Fee</th>
+                                        <th>Status</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php foreach ($result['medical_history'] as $history): ?>
+                                    <?php foreach ($result['appointments'] as $appointment): ?>
                                         <tr>
-                                            <td><?php echo htmlspecialchars($history['medical_condition']); ?></td>
-                                            <td><?php echo date('M j, Y', strtotime($history['diagnosis_date'])); ?></td>
-                                            <td><?php echo htmlspecialchars($history['notes']); ?></td>
+                                            <td><?php echo date('M j, Y g:i A', strtotime($appointment['appointment_date'])); ?></td>
+                                            <td><?php echo htmlspecialchars($appointment['user_id']); // Assuming Controller fetches doctor name based on user_id ?></td>
+                                            <td>$<?php echo number_format($appointment['consultation_fee'], 2); ?></td>
+                                            <td>
+                                                <span class="badge bg-<?php 
+                                                    echo $appointment['appointment_status'] === 'Completed' ? 'success' : 
+                                                         ($appointment['appointment_status'] === 'Scheduled' ? 'info' : 'danger');
+                                                ?>">
+                                                    <?php echo htmlspecialchars($appointment['appointment_status']); ?>
+                                                </span>
+                                            </td>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>
@@ -524,14 +540,13 @@ include '../layouts/header.php';
                     <?php endif; ?>
                 </div>
             </div>
-            
-            <!-- Recent Treatments -->
+
             <div class="card">
                 <div class="card-header">
                     <h5 class="card-title mb-0">Recent Treatments</h5>
                 </div>
                 <div class="card-body">
-                    <?php if (empty($result['treatment'])): ?>
+                    <?php if (empty($result['treatments'])): // CORRECTED KEY: was 'treatment', now 'treatments' ?>
                         <p class="text-muted">No treatments recorded.</p>
                     <?php else: ?>
                         <div class="table-responsive">
@@ -539,16 +554,16 @@ include '../layouts/header.php';
                                 <thead>
                                     <tr>
                                         <th>Date</th>
-                                        <th>Doctor</th>
+                                        <th>Doctor (User ID)</th>
                                         <th>Notes</th>
                                         <th>Fee</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php foreach ($result['treatment'] as $treatment): ?>
+                                    <?php foreach ($result['treatments'] as $treatment): ?>
                                         <tr>
                                             <td><?php echo date('M j, Y', strtotime($treatment['treatment_date'])); ?></td>
-                                            <td><?php echo htmlspecialchars($treatment['doctor_name']); ?></td>
+                                            <td><?php echo htmlspecialchars($treatment['user_id']); // Assuming Controller fetches doctor name based on user_id ?></td>
                                             <td><?php echo htmlspecialchars(substr($treatment['notes'], 0, 50)) . (strlen($treatment['notes']) > 50 ? '...' : ''); ?></td>
                                             <td>$<?php echo number_format($treatment['treatment_fee'], 2); ?></td>
                                         </tr>

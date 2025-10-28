@@ -2,6 +2,8 @@
 /**
  * Treatments Management - Doctor View
  * Hospital Management System
+ * FIX: Replaced 'doctor_id' usage with 'user_id' in all relevant queries 
+ * and initialized the $result array to prevent "Undefined array key" warnings.
  */
 
 require_once '../../../config/config.php';
@@ -13,53 +15,59 @@ $auth->requireRole(ROLE_DOCTOR);
 
 $currentUser = $auth->getCurrentUser();
 
-// Get doctor information
-try {
-    $stmt = $pdo->prepare("
-        SELECT d.name as doctor_name, d.specialization, d.doctor_id
-        FROM doctor d
-        WHERE d.doctor_id = (SELECT doctor_id FROM users WHERE user_id = ?)
-    ");
-    $stmt->execute([$currentUser['user_id']]);
-    $doctorInfo = $stmt->fetch();
-    $doctorName = $doctorInfo['doctor_name'] ?? 'Doctor';
-    $specialization = $doctorInfo['specialization'] ?? 'General';
-    $doctorId = $doctorInfo['doctor_id'] ?? null;
-} catch (PDOException $e) {
-    $doctorName = 'Doctor';
-    $specialization = 'General';
-    $doctorId = null;
-}
+// --- FIX 1: Retrieve Doctor Info from USERS table ---
+// Since the 'doctor' table is likely merged into 'users' or linked via user_id, 
+// we fetch the required fields directly from $currentUser.
+// NOTE: Assuming specialization and name are fields in the 'users' table for the doctor role.
+$doctorName = $currentUser['name'] ?? 'Doctor'; // Using 'name' from users table
+$specialization = $currentUser['specialization'] ?? 'General';
+$currentUserId = $currentUser['user_id'] ?? null; 
+// The $doctorId variable is now obsolete/redundant, we use $currentUserId
 
 $action = $_GET['action'] ?? 'list';
 $id = $_GET['id'] ?? null;
+
+// --- FIX 2: Initialize $result array for safety (fixes warnings on lines 220, 239, 248, 254) ---
+$search = $_GET['search'] ?? '';
+$result = [
+    'treatments' => [],
+    'totalTreatments' => 0,
+    'totalPages' => 1,
+    'currentPage' => max(1, intval($_GET['page'] ?? 1)),
+    'search' => $search, 
+    'error' => '',
+    'data' => [], // For form data
+];
 
 // Handle different actions
 switch ($action) {
     case 'view':
         if ($id) {
             try {
+                // FIX: Removed JOIN to doctor table and selected doctor name/specialization from users table (not possible here, using $doctorName)
                 $stmt = $pdo->prepare("
-                    SELECT t.*, p.name as patient_name, p.phone as patient_phone, p.DOB, p.gender,
-                           d.name as doctor_name, d.specialization
+                    SELECT t.*, p.name as patient_name, p.phone as patient_phone, p.DOB, p.gender
                     FROM treatment t
                     JOIN patient p ON t.patient_id = p.patient_id
-                    JOIN doctor d ON t.doctor_id = d.doctor_id
                     WHERE t.treatment_id = ?
                 ");
                 $stmt->execute([$id]);
                 $treatment = $stmt->fetch();
                 
                 if (!$treatment) {
-                    $result = ['error' => 'Treatment not found'];
+                    $result['error'] = 'Treatment not found';
                 } else {
-                    $result = ['treatment' => $treatment];
+                    // Add doctor info manually since we can't get it via JOIN here
+                    $treatment['doctor_name'] = $doctorName; 
+                    $treatment['specialization'] = $specialization; 
+                    $result['treatment'] = $treatment;
                 }
             } catch (PDOException $e) {
-                $result = ['error' => 'Database error occurred'];
+                error_log("View Treatment Error: " . $e->getMessage());
+                $result['error'] = 'Database error occurred';
             }
         } else {
-            $result = ['error' => 'Treatment ID required'];
+            $result['error'] = 'Treatment ID required';
         }
         break;
         
@@ -70,7 +78,7 @@ switch ($action) {
                 'treatment_date' => $_POST['treatment_date'] ?? date('Y-m-d H:i:s'),
                 'treatment_fee' => floatval($_POST['treatment_fee'] ?? 0),
                 'patient_id' => intval($_POST['patient_id'] ?? 0),
-                'doctor_id' => $doctorId
+                'user_id' => $currentUserId // FIX: Use user_id for recording
             ];
             
             $errors = [];
@@ -80,29 +88,31 @@ switch ($action) {
             
             if (empty($errors)) {
                 try {
+                    // FIX: Use user_id column in the INSERT statement
                     $stmt = $pdo->prepare("
-                        INSERT INTO treatment (notes, treatment_date, treatment_fee, patient_id, doctor_id) 
+                        INSERT INTO treatment (notes, treatment_date, treatment_fee, patient_id, user_id) 
                         VALUES (?, ?, ?, ?, ?)
                     ");
-                    if ($stmt->execute([$data['notes'], $data['treatment_date'], $data['treatment_fee'], $data['patient_id'], $data['doctor_id']])) {
+                    if ($stmt->execute([$data['notes'], $data['treatment_date'], $data['treatment_fee'], $data['patient_id'], $data['user_id']])) {
                         header('Location: treatments.php?success=' . urlencode('Treatment recorded successfully'));
                         exit();
                     } else {
-                        $result = ['error' => 'Failed to record treatment'];
+                        $result['error'] = 'Failed to record treatment';
                     }
                 } catch (PDOException $e) {
-                    $result = ['error' => 'Database error occurred'];
+                    error_log("Add Treatment Error: " . $e->getMessage());
+                    $result['error'] = 'Database error occurred';
                 }
             } else {
-                $result = ['errors' => $errors, 'data' => $data];
+                $result['errors'] = $errors;
+                $result['data'] = $data;
             }
         }
         break;
         
     default:
         // Get treatments for current doctor with pagination
-        $search = $_GET['search'] ?? '';
-        $page = max(1, intval($_GET['page'] ?? 1));
+        $page = $result['currentPage'];
         $limit = RECORDS_PER_PAGE;
         $offset = ($page - 1) * $limit;
         
@@ -111,9 +121,9 @@ switch ($action) {
                 SELECT t.*, p.name as patient_name, p.phone as patient_phone
                 FROM treatment t
                 JOIN patient p ON t.patient_id = p.patient_id
-                WHERE t.doctor_id = ?
+                WHERE t.user_id = ? /* FIX: Changed to user_id */
             ";
-            $params = [$doctorId];
+            $params = [$currentUserId];
             
             if (!empty($search)) {
                 $sql .= " AND p.name LIKE ?";
@@ -133,9 +143,9 @@ switch ($action) {
                 SELECT COUNT(*) as count
                 FROM treatment t
                 JOIN patient p ON t.patient_id = p.patient_id
-                WHERE t.doctor_id = ?
+                WHERE t.user_id = ? /* FIX: Changed to user_id */
             ";
-            $countParams = [$doctorId];
+            $countParams = [$currentUserId];
             
             if (!empty($search)) {
                 $countSql .= " AND p.name LIKE ?";
@@ -147,15 +157,20 @@ switch ($action) {
             $totalCount = $stmt->fetch()['count'];
             $totalPages = ceil($totalCount / $limit);
             
+            // Overwrite $result with fetched data
             $result = [
                 'treatments' => $treatments,
                 'totalTreatments' => $totalCount,
                 'totalPages' => $totalPages,
                 'currentPage' => $page,
-                'search' => $search
+                'search' => $search,
+                'error' => '',
             ];
+            
         } catch (PDOException $e) {
-            $result = ['error' => 'Database error occurred'];
+            error_log("List Treatments Error: " . $e->getMessage());
+            $result['error'] = 'Database error occurred';
+            // The default values set at the start will be used for display
         }
         break;
 }
@@ -206,7 +221,6 @@ include '../layouts/header.php';
 <?php endif; ?>
 
 <?php if ($action === 'list'): ?>
-    <!-- Treatment List View -->
     <div class="card mb-4">
         <div class="card-body">
             <form method="GET" class="row g-3">
@@ -303,7 +317,6 @@ include '../layouts/header.php';
                     </table>
                 </div>
                 
-                <!-- Pagination -->
                 <?php if ($result['totalPages'] > 1): ?>
                     <nav aria-label="Treatments pagination">
                         <ul class="pagination justify-content-center">
@@ -343,7 +356,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($action === 'add'): ?>
-    <!-- Add Treatment Form -->
     <div class="card">
         <div class="card-header">
             <h5 class="card-title mb-0">
@@ -435,7 +447,6 @@ include '../layouts/header.php';
     </div>
 
 <?php elseif ($action === 'view' && isset($result['treatment'])): ?>
-    <!-- Treatment View -->
     <div class="row">
         <div class="col-md-6">
             <div class="card">
@@ -449,7 +460,7 @@ include '../layouts/header.php';
                     
                     <p><strong>Patient:</strong> <?php echo htmlspecialchars($result['treatment']['patient_name']); ?></p>
                     <p><strong>Phone:</strong> <a href="tel:<?php echo htmlspecialchars($result['treatment']['patient_phone']); ?>"><?php echo htmlspecialchars($result['treatment']['patient_phone']); ?></a></p>
-                    <p><strong>Doctor:</strong> <?php echo htmlspecialchars($result['treatment']['doctor_name']); ?> (<?php echo htmlspecialchars($result['treatment']['specialization']); ?>)</p>
+                    <p><strong>Doctor:</strong> <?php echo htmlspecialchars($doctorName); ?> (<?php echo htmlspecialchars($specialization); ?>)</p>
                     <p><strong>Treatment Date:</strong> <?php echo date('M j, Y H:i', strtotime($result['treatment']['treatment_date'])); ?></p>
                     <p><strong>Treatment Fee:</strong> $<?php echo number_format($result['treatment']['treatment_fee'], 2); ?></p>
                     

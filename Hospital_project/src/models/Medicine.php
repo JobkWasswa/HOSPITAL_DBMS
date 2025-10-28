@@ -190,7 +190,8 @@ class Medicine {
      */
     public function getStatistics() {
         try {
-            $stmt = $pdo->prepare("
+            // FIX: Replaced $pdo with $this->pdo
+            $stmt = $this->pdo->prepare("
                 SELECT 
                     COUNT(*) as total,
                     SUM(stock_quantity) as total_stock,
